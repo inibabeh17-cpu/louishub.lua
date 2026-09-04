@@ -254,7 +254,6 @@ local AREA_NAMES = {
 local AREA_SET = {}
 for _, a in ipairs(AREA_NAMES) do AREA_SET[a] = true end
 
--- Helper: grab all eggs from Backpack
 local function getEggsFromBackpack(minRarity)
     local result = {}
     local minNum = RARITY_ORDER[minRarity] or 0
@@ -489,7 +488,6 @@ local function doHumanoidBypass()
     if not origHum then return end
     
     pcall(function()
-        -- 1. Clone original Humanoid
         local cloneHum = origHum:Clone()
         cloneHum.WalkSpeed  = origHum.WalkSpeed
         cloneHum.JumpPower  = origHum.JumpPower
@@ -500,21 +498,18 @@ local function doHumanoidBypass()
         
         task.wait(0.05)
         
-        -- 2. Destroy original Humanoid (severs BAC / anti-cheat listeners)
         origHum:Destroy()
         
         task.wait(0.05)
         
-        -- 3. Reset Camera Subject & States
         workspace.CurrentCamera.CameraSubject = cloneHum
         cloneHum.PlatformStand = false
         cloneHum.Sit = false
         cloneHum:ChangeState(Enum.HumanoidStateType.Running)
         
-        -- 4. Re-position to START_POS
         local rootPart = char:FindFirstChild("HumanoidRootPart")
         if rootPart then
-            rootPart.CFrame                  = CFrame.new(START_POS)
+            rootPart.CFrame                  = CFrame.new(START_POS + Vector3.new(0, 3, 0))
             rootPart.AssemblyLinearVelocity  = Vector3.zero
             rootPart.AssemblyAngularVelocity = Vector3.zero
         end
@@ -522,7 +517,6 @@ local function doHumanoidBypass()
         print("[SAE] Spoofed Humanoid bypass OK")
     end)
     
-    -- Activate speed bypass if enabled
     if _speedBypassActive then 
         startSpeedBypass(State.speed) 
     end
@@ -598,7 +592,7 @@ local function updateAnim()
 end
 
 -- ============================================================
--- MOVEMENT (walkTo)
+-- MOVEMENT (walkTo - Instant Brake & Anti-Void Protected)
 -- ============================================================
 local function walkTo(goal, timeout, isReturning, checkFn)
     local h2 = hum()
@@ -607,15 +601,23 @@ local function walkTo(goal, timeout, isReturning, checkFn)
     if typeof(goal) == "Instance" then goal = goal.Position end
 
     timeout = timeout or 20
-    local speed      = isReturning and (State.antiGuard and 1000 or State.speed) or State.speed
+    -- Cap maximum return speed to 180 to completely avoid physics tunneling into the void
+    local speed = isReturning and (State.antiGuard and math.clamp(State.speed * 1.5, 120, 180) or State.speed) or State.speed
     local targetDist = 4
 
     if isReturning then
         r = root(); h2 = hum()
         if r and h2 then
-            pcall(function() r.CFrame = CFrame.new(START_POS) end)
-            r.AssemblyLinearVelocity  = Vector3.zero
-            r.AssemblyAngularVelocity = Vector3.zero
+            -- Safe vertical offset to ensure character never snaps under the floor
+            local safeTarget = Vector3.new(START_POS.X, math.max(START_POS.Y, r.Position.Y) + 1, START_POS.Z)
+            pcall(function() 
+                r.Anchored = true
+                r.CFrame = CFrame.new(safeTarget) 
+                r.AssemblyLinearVelocity  = Vector3.zero
+                r.AssemblyAngularVelocity = Vector3.zero
+                RunService.Heartbeat:Wait()
+                r.Anchored = false
+            end)
             h2.WalkSpeed = 16
         end
         return true
@@ -643,12 +645,25 @@ local function walkTo(goal, timeout, isReturning, checkFn)
         local dist = (r.Position - goal).Magnitude
 
         if dist <= targetDist then
+            -- 1. INSTANT BRAKE: Immediately kill momentum and cancel movement path
+            if _speedBypassActive then stopSpeedBypass() end
             h2.WalkSpeed = 0
             h2:Move(Vector3.zero, false)
-            r.AssemblyLinearVelocity  = Vector3.zero
-            r.AssemblyAngularVelocity = Vector3.zero
+            
+            -- 2. ANTI-VOID SAFE POSITIONING: Elevate target Y to keep waist safely above the floor
+            local safeTargetY = math.max(goal.Y + 3.2, r.Position.Y)
+            local safeGoalPos = Vector3.new(goal.X, safeTargetY, goal.Z)
+
             pcall(function()
-                r.CFrame = CFrame.new(goal) * (r.CFrame - r.CFrame.Position)
+                -- Anchor for 1 physics step to instantly zero out sliding inertia
+                r.Anchored = true
+                r.AssemblyLinearVelocity  = Vector3.zero
+                r.AssemblyAngularVelocity = Vector3.zero
+                r.CFrame = CFrame.new(safeGoalPos) * (r.CFrame - r.CFrame.Position)
+                RunService.Heartbeat:Wait()
+                r.AssemblyLinearVelocity  = Vector3.zero
+                r.AssemblyAngularVelocity = Vector3.zero
+                r.Anchored = false
             end)
             break
         end
@@ -675,7 +690,14 @@ local function walkTo(goal, timeout, isReturning, checkFn)
 
     if _speedBypassActive then stopSpeedBypass() end
     h2 = hum()
-    if h2 then h2.WalkSpeed = 16 end
+    if h2 then 
+        h2.WalkSpeed = 16 
+        h2:Move(Vector3.zero, false)
+    end
+    if r then
+        r.AssemblyLinearVelocity  = Vector3.zero
+        r.AssemblyAngularVelocity = Vector3.zero
+    end
     return true
 end
 
@@ -865,7 +887,7 @@ task.spawn(function()
 end)
 
 -- ============================================================
--- ANTI-STUCK TREADMILL
+-- ANTI-STUCK TREADMILL (Anti-Void Protected)
 -- ============================================================
 task.spawn(function()
     local stuckTimer = 0
@@ -893,8 +915,10 @@ task.spawn(function()
             stuckTimer += 1
             if stuckTimer >= 2 then
                 pcall(function()
-                    local opposite = Vector3.new(-vel.X, 60, -vel.Z).Unit * speed * 3
-                    r.AssemblyLinearVelocity = opposite
+                    -- Safely impulse horizontally and slightly upward without slamming downward
+                    local horizontalDir = Vector3.new(-vel.X, 0, -vel.Z).Unit
+                    local escapeSpeed = math.clamp(speed * 1.2, 30, 75)
+                    r.AssemblyLinearVelocity = Vector3.new(horizontalDir.X * escapeSpeed, 35, horizontalDir.Z * escapeSpeed)
                 end)
                 h.PlatformStand = false
                 h.Sit           = false
@@ -1596,7 +1620,7 @@ local function updateStatsGui(show)
 end
 
 -- ============================================================
--- FARM CYCLE
+-- FARM CYCLE (Instant Brake & Anti-Void Snap)
 -- ============================================================
 local function farmCycle()
     if State.busy or not State.running then return end
@@ -1639,6 +1663,7 @@ local function farmCycle()
             end
         end)
 
+        -- 1. Stop bypass and kill momentum completely before claiming
         if _speedBypassActive then stopSpeedBypass() end
         local h2stop = hum()
         if h2stop then
@@ -1646,14 +1671,25 @@ local function farmCycle()
             h2stop:Move(Vector3.zero, false)
         end
 
+        -- 2. Anti-void protected snapping: Stand safely at ground height + 3 studs
         local rStop = root()
         if rStop then
-            rStop.AssemblyLinearVelocity  = Vector3.zero
-            rStop.AssemblyAngularVelocity = Vector3.zero
             pcall(function()
-                rStop.CFrame = CFrame.new(
-                    part.Position + (rStop.Position - part.Position).Unit * 2
-                ) * (rStop.CFrame - rStop.CFrame.Position)
+                rStop.Anchored = true
+                rStop.AssemblyLinearVelocity  = Vector3.zero
+                rStop.AssemblyAngularVelocity = Vector3.zero
+                
+                local safeY = math.max(part.Position.Y + 3.2, rStop.Position.Y)
+                local offsetDir = (rStop.Position - part.Position)
+                local flatDir = Vector3.new(offsetDir.X, 0, offsetDir.Z)
+                local safeOffset = flatDir.Magnitude > 0.1 and (flatDir.Unit * 2) or Vector3.zero
+                local safePos = Vector3.new(part.Position.X, safeY, part.Position.Z) + safeOffset
+                
+                rStop.CFrame = CFrame.new(safePos) * (rStop.CFrame - rStop.CFrame.Position)
+                RunService.Heartbeat:Wait()
+                rStop.AssemblyLinearVelocity  = Vector3.zero
+                rStop.AssemblyAngularVelocity = Vector3.zero
+                rStop.Anchored = false
             end)
         end
 
@@ -1697,7 +1733,9 @@ local function farmCycle()
         end
         State.lockedRecord = nil
 
-        if _speedBypassActive then startSpeedBypass(State.antiGuard and 1000 or State.speed) end
+        -- 3. Return speed capped safely (avoids high-velocity collision clipping into void)
+        local safeReturnSpeed = State.antiGuard and math.clamp(State.speed * 1.5, 120, 180) or State.speed
+        if _speedBypassActive then startSpeedBypass(safeReturnSpeed) end
 
         local rbTimeout = tick() + 2
         while tick() < rbTimeout do
