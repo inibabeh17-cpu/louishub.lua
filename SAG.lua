@@ -1,6 +1,6 @@
 -- ============================================================
 --  LOUIS HUB - STEAL AN EGG (Luna Interface Suite Edition)
---  Clean architecture, 100% Full Features
+--  Clean architecture, 100% Full Features in English
 -- ============================================================
 
 -- ============================================================
@@ -184,7 +184,7 @@ local State = {
     floatHeight       = 3,
     -- Animation
     animEnabled       = true,
-    -- Auto Place (independent loop)
+    -- Auto Place
     placeEnabled      = false,
     placeInterval     = 5,
     placeMinRarity    = "All",
@@ -210,7 +210,7 @@ local State = {
     favMinWeight       = 0,
     favMaxWeight       = 0,
     favMinValue        = 0,
-    -- Auto Hatch (independent loop)
+    -- Auto Hatch
     hatchEnabled      = false,
     hatchInterval     = 3,
     -- Auto Sell
@@ -226,7 +226,7 @@ local State = {
     -- Auto Sell Pet
     sellPetMaxRarities = {},
     sellPetInterval   = 5,
-    -- Bat Aura (independent loop)
+    -- Bat Aura
     batAura           = false,
     batInterval       = 0.1,
     -- ESP
@@ -240,7 +240,7 @@ local State = {
     antiAfk           = false,
 }
 
--- Base teleport koordinat
+-- Base teleport coordinates
 local START_POS = Vector3.new(519.155, 70.576, -356.103)
 local SAFE_POS  = Vector3.new(519.155, 70.576, -356.103)
 
@@ -257,9 +257,6 @@ local function hum()
     return c and c:FindFirstChildOfClass("Humanoid")
 end
 
--- ============================================================
--- RARITY ORDER (global)
--- ============================================================
 local RARITY_ORDER = {
     Common=1,Uncommon=2,Rare=3,Epic=4,Legendary=5,Mythic=6,
     SuperRare=7,Exotic=8,Limited=9,Divine=10,Secret=11,Titan=12,
@@ -267,9 +264,6 @@ local RARITY_ORDER = {
     Eternal=18,Brainrot=19,Mythical=20,Exclusive=21,
 }
 
--- ============================================================
--- PET RARITY MAP
--- ============================================================
 local PET_BY_RARITY = {
     ["Common"]    = {"Chicken","Dog","Frog","Duckling","Jerboa"},
     ["Uncommon"]  = {"Bird","Catfish","Fennec"},
@@ -289,42 +283,12 @@ for rarity, pets in pairs(PET_BY_RARITY) do
     end
 end
 
--- ============================================================
--- EGG AREA NAMES
--- ============================================================
 local AREA_NAMES = {
     "Forest","Lake","Desert","Jungle","Snow","Volcano",
     "Abyss Ocean","Prehistoric","Cosmic","Cherry Blossom","Titan Temple"
 }
 local AREA_SET = {}
 for _, a in ipairs(AREA_NAMES) do AREA_SET[a] = true end
-
-local function getEggsFromBackpack(minRarity)
-    local result = {}
-    local minNum = RARITY_ORDER[minRarity] or 0
-    for _, tool in ipairs(LocalPlayer.Backpack:GetChildren()) do
-        if not tool:IsA("Tool") then continue end
-        local itemType = tool:GetAttribute("ItemType")
-        local isEgg = (itemType == "AssetEgg" or itemType == "PetEgg") or AREA_SET[tool.Name]
-        if not isEgg then continue end
-        local rarNum = 0
-        local rarity = "Unknown"
-        local rarAttr = tool:GetAttribute("Rarity") or tool:GetAttribute("rarity")
-        if rarAttr and RARITY_ORDER[rarAttr] then
-            rarity = rarAttr
-            rarNum = RARITY_ORDER[rarAttr]
-        end
-        if minNum <= 0 or rarNum >= minNum or rarNum == 0 then
-            table.insert(result, {
-                tool    = tool,
-                name    = tool.Name,
-                rarity  = rarity,
-                rarNum  = rarNum,
-            })
-        end
-    end
-    return result
-end
 
 local function formatNumber(n)
     n = tonumber(n) or 0
@@ -334,9 +298,6 @@ local function formatNumber(n)
     else return tostring(math.floor(n)) end
 end
 
--- ============================================================
--- ASSET HELPERS
--- ============================================================
 local function getAssetData(record)
     if not record then return {} end
     if Assets and record.AssetCategory then
@@ -390,39 +351,6 @@ local function getRarityColor(record)
     return Color3.fromRGB(255, 255, 255)
 end
 
-local function getRarityNumber(record)
-    if record and record.Rarity and type(record.Rarity) == "table" then
-        if type(record.Rarity.RarityNumber) == "number" then
-            return record.Rarity.RarityNumber
-        end
-    end
-    local d = getAssetData(record)
-    if d.Rarity and d.Rarity.RarityNumber then return d.Rarity.RarityNumber end
-    if RarityModule and RarityModule.Rarities then
-        local rn = getRarityName(record)
-        local rm = RarityModule.Rarities[rn]
-        if rm then return rm.RarityNumber or 0 end
-    end
-    return 0
-end
-
-local function getRarityNumberByName(name)
-    if name == "All" then return -1 end
-    if RarityModule and RarityModule.Rarities and RarityModule.Rarities[name] then
-        return RarityModule.Rarities[name].RarityNumber or 1
-    end
-    local map = {
-        Common=1, Uncommon=2, Rare=3, Epic=4, Legendary=5, Mythic=6,
-        SuperRare=7, Exotic=8, Limited=9, Divine=10, Secret=11, Titan=12,
-        Cosmic=13, Celestial=14, Transcendent=15, Prismatic=16, Rainbow=17,
-        Eternal=18, Brainrot=19, Mythical=20, Exclusive=21
-    }
-    return map[name] or 1
-end
-
--- ============================================================
--- RARITY, AREA & MUTATION FILTERS
--- ============================================================
 local MUTATIONS = {"Silver", "Bloom", "Golden", "Rainbow", "Spirit Bloom"}
 
 local function isMutationAllowed(record)
@@ -471,9 +399,6 @@ local function isAreaAllowed(rec)
     return false
 end
 
--- ============================================================
--- NO KNOCKBACK
--- ============================================================
 local function applyNoKnockback()
     if type(getconnections) ~= "function" then
         warn("[NoKnockback] getconnections not available"); return
@@ -484,30 +409,19 @@ local function applyNoKnockback()
     if not remote then return end
     local ok, conns = pcall(function() return getconnections(remote.OnClientEvent) end)
     if not ok or not conns then return end
-    local patched = 0
     for _, conn in next, conns do
         pcall(function() conn:Disconnect() end)
-        patched += 1
     end
-    print("[NoKnockback] patched", patched, "connections")
+    print("[NoKnockback] patched")
 end
 
--- ============================================================
--- AUTO UPGRADE BASE & TREADMILL
--- ============================================================
 local function upgradeBase()
-    local net = getNet(); if not net then return end
-    local remote = net:FindFirstChild("RE/Homestead/AskBaseTierRaise")
-    if not remote then return end
-    pcall(function() remote:FireServer() end)
+    fireRemote("RE/Homestead/AskBaseTierRaise")
     print("[UpgradeBase] fired")
 end
 
 local function upgradeTreadmill(id)
-    local net = getNet(); if not net then return end
-    local remote = net:FindFirstChild("RF/Treadmill/AskTierRaise")
-    if not remote then return end
-    pcall(function() remote:InvokeServer(id) end)
+    invokeRemote("RF/Treadmill/AskTierRaise", id)
     print("[UpgradeTreadmill] fired id:", tostring(id))
 end
 
@@ -580,7 +494,7 @@ task.spawn(function()
                 r.AssemblyAngularVelocity = Vector3.zero
                 r.CFrame = CFrame.new(START_POS + Vector3.new(0, 4, 0))
             end)
-            print("[AntiVoid] Karakter dicegah jatuh ke void! Posisi dikembalikan ke base.")
+            print("[AntiVoid] Saved from void! Teleported to base.")
         end
     end
 end)
@@ -595,15 +509,15 @@ local function updateFloat()
     _floatConn = RunService.RenderStepped:Connect(function()
         if not State.floatEnabled then return end
         local c = LocalPlayer.Character
-        if not c then return end
-        local hrp = c:FindFirstChild("HumanoidRootPart")
-        if not hrp then return end
-        local rot = hrp.CFrame - hrp.CFrame.Position
-        hrp.CFrame = CFrame.new(
-            hrp.Position.X,
-            hrp.Position.Y + State.floatHeight,
-            hrp.Position.Z
-        ) * rot
+        local hrp = c and c:FindFirstChild("HumanoidRootPart")
+        if hrp then
+            local rot = hrp.CFrame - hrp.CFrame.Position
+            hrp.CFrame = CFrame.new(
+                hrp.Position.X,
+                hrp.Position.Y + State.floatHeight,
+                hrp.Position.Z
+            ) * rot
+        end
     end)
 end
 
@@ -802,7 +716,7 @@ local function runAutoPlace()
     pcall(function()
         local myPlot = PlotState.ResolvePlot()
         if not myPlot or not myPlot.CenterPoint or not myPlot.PetArea then
-            warn("[AutoPlace] ResolvePlot gagal"); return
+            warn("[AutoPlace] ResolvePlot failed"); return
         end
 
         local plotPos = myPlot.CenterPoint.Position
@@ -854,13 +768,8 @@ local function runAutoPlace()
             return EggState.ReadOwnerEggs(LocalPlayer.UserId)
         end)
         if not ok or type(owned) ~= "table" or not next(owned) then
-            print("[AutoPlace] owned egg kosong -- ok:", ok, "type:", type(owned))
-            return
+            print("[AutoPlace] owned eggs empty"); return
         end
-
-        print("[AutoPlace] owned eggs count:", (function()
-            local c = 0; for _ in pairs(owned) do c += 1 end; return c
-        end)())
 
         local minRarNum = RARITY_ORDER[State.placeMinRarity] or 0
         local placed = 0
@@ -914,14 +823,10 @@ local function runAutoPlace()
             local ok3, res = pcall(function()
                 return placeRemote:InvokeServer({Uid = uid, LocalCFrame = localCFrame})
             end)
-            warn(">>>PLACE<<< ok="..tostring(ok3).." res="..tostring(res).." uid="..uid:sub(1,8))
             if ok3 and res == true then placed += 1 end
             task.wait(0.1)
         end
-        print(string.format("[AutoPlace] DONE placed=%d skipped=%d / total=%d",
-            placed, skippedPlacement, (function()
-                local c=0; for _ in pairs(owned) do c+=1 end; return c
-            end)()))
+        print(string.format("[AutoPlace] DONE placed=%d skipped=%d", placed, skippedPlacement))
     end)
 end
 
@@ -983,7 +888,6 @@ task.spawn(function()
                 pcall(function() h:ChangeState(Enum.HumanoidStateType.Jumping) end)
                 pcall(function() h:MoveTo(r.Position + Vector3.new(-vel.X, 0, -vel.Z).Unit * 10) end)
                 stuckTimer = 0
-                print("[AntiStuck] treadmill escape triggered, hVel=" .. math.floor(hVel))
             end
         else
             stuckTimer = 0
@@ -1198,7 +1102,6 @@ local function runAutoPlacePet()
             end
             task.wait(0.1)
         end
-        print(string.format("[AutoPlacePet] total placed=%d", placed))
     end)
 end
 
@@ -1277,11 +1180,9 @@ local function runAutoPlaceBestPet()
             end)
             if ok3 and res then
                 placed += 1
-                print("[PlaceBestPet] placed:", pet.name, "rarity:", tostring(PET_RARITY_MAP[pet.name]))
             end
             task.wait(0.1)
         end
-        print("[PlaceBestPet] total placed:", placed)
     end)
 end
 
@@ -1324,12 +1225,10 @@ local function runAutoHatch()
                 end)
                 if ok and r1 == true then
                     hatched += 1
-                    print("[AutoHatch] hatched uid:", uid:sub(1,8), "pet:", tostring(petUid or r2))
                 end
                 task.wait(0.05)
             end
         end
-        if hatched > 0 then print("[AutoHatch] total hatched:", hatched) end
     end)
 end
 
@@ -1352,13 +1251,10 @@ local function runAutoSellEgg()
         if not net then return end
         local sellRemote = net:FindFirstChild("RE/PetSatchel/SellPet")
         local wearRemote = net:FindFirstChild("RF/EggWorld/AskWearTool")
-        if not sellRemote then warn("[SellEgg] SellPet not found"); return end
+        if not sellRemote then return end
 
         local owned = EggState.ReadOwnerEggs(LocalPlayer.UserId)
         if type(owned) ~= "table" then return end
-
-        local maxNum = RARITY_ORDER[State.sellEggMaxRarity] or 0
-        local sold = 0
 
         for uid, rec in pairs(owned) do
             if type(uid) ~= "string" then continue end
@@ -1372,19 +1268,18 @@ local function runAutoSellEgg()
                 task.wait(0.2)
             end
             pcall(function() sellRemote:FireServer({uid}) end)
-            sold += 1
             task.wait(0.1)
         end
-        if sold > 0 then print("[SellEgg] sold:", sold) end
     end)
 end
 
 task.spawn(function()
     while true do
         task.wait(State.sellEggInterval or 10)
-        if not State.sellEggEnabled then continue end
-        if not EggState then loadModules() end
-        pcall(runAutoSellEgg)
+        if State.sellEggEnabled then
+            if not EggState then loadModules() end
+            pcall(runAutoSellEgg)
+        end
     end
 end)
 
@@ -1409,45 +1304,29 @@ local function runAutoSell()
 
         if State.sellAll then
             local remote = net:FindFirstChild("RE/PetSatchel/SellEveryPet")
-            if remote then
-                remote:FireServer()
-                print("[AutoSell] SellEveryPet fired")
-            end
+            if remote then remote:FireServer() end
             return
         end
 
         if not EggState then loadModules() end
-        if not EggState then warn("[AutoSell] EggState nil"); return end
+        if not EggState then return end
 
         local wearRemote    = net:FindFirstChild("RF/EggWorld/AskWearTool")
         local triggerRemote = net:FindFirstChild("RE/ToolTrigger/Trigger")
-        if not wearRemote or not triggerRemote then
-            warn("[AutoSell] remote missing -- wearTool:" .. tostring(wearRemote ~= nil) ..
-                 " trigger:" .. tostring(triggerRemote ~= nil))
-            return
-        end
+        if not wearRemote or not triggerRemote then return end
 
         local ok, owned = pcall(function() return EggState.ReadOwnerEggs(LocalPlayer.UserId) end)
-        if not ok or type(owned) ~= "table" or not next(owned) then
-            print("[AutoSell] owned egg kosong")
-            return
-        end
+        if not ok or type(owned) ~= "table" or not next(owned) then return end
 
-        local sold, skipped = 0, 0
         for _, rec in ipairs(owned) do
             if not rec.Uid then continue end
             local rarName = getRarityName(rec)
-            if next(State.sellPetMaxRarities) and not State.sellPetMaxRarities[rarName] then skipped += 1; continue end
+            if next(State.sellPetMaxRarities) and not State.sellPetMaxRarities[rarName] then continue end
 
-            local ok2, toolName = pcall(function()
-                return wearRemote:InvokeServer(rec.Uid)
-            end)
-
+            pcall(function() wearRemote:InvokeServer(rec.Uid) end)
             task.wait(0.2)
 
-            local eggName = rec.AssetCategory or rec.DisplayName
-                or (rec.Rarity and rec._id) or tostring(rec.Uid)
-
+            local eggName = rec.AssetCategory or rec.DisplayName or (rec.Rarity and rec._id) or tostring(rec.Uid)
             local tool = getToolFromNil(eggName)
             if not tool and LocalPlayer.Character then
                 tool = LocalPlayer.Character:FindFirstChildOfClass("Tool")
@@ -1455,14 +1334,9 @@ local function runAutoSell()
 
             if tool then
                 pcall(function() triggerRemote:FireServer(tool) end)
-                sold += 1
-                print("[AutoSell] sold: " .. tostring(eggName))
-            else
-                warn("[AutoSell] tool not found for: " .. tostring(eggName))
             end
             task.wait(0.3)
         end
-        print(string.format("[AutoSell] sold=%d skipped=%d", sold, skipped))
     end)
 end
 
@@ -1491,9 +1365,7 @@ local function runAutoSellPet()
 
         local sellRemote = net:FindFirstChild("RE/PetSatchel/SellPet")
         local wearRemote = net:FindFirstChild("RF/EggWorld/AskWearTool")
-        if not sellRemote then warn("[SellPet] SellPet remote not found"); return end
-
-        local sold, skipped, unknown = 0, 0, 0
+        if not sellRemote then return end
 
         for _, tool in ipairs(LocalPlayer.Backpack:GetChildren()) do
             if not tool:IsA("Tool") then continue end
@@ -1502,15 +1374,15 @@ local function runAutoSellPet()
 
             local rarity = PET_RARITY_MAP[tool.Name]
             local rarNum = rarity and (RARITY_ORDER[rarity] or 0) or 0
-            if rarNum == 0 then unknown += 1; continue end
+            if rarNum == 0 then continue end
 
-            if next(State.sellPetMaxRarities) and not State.sellPetMaxRarities[rarity] then skipped += 1; continue end
+            if next(State.sellPetMaxRarities) and not State.sellPetMaxRarities[rarity] then continue end
 
             local isFav = tool:GetAttribute("IsFavorited") or tool:GetAttribute("Favorited")
-            if isFav then skipped += 1; continue end
+            if isFav then continue end
 
             local uid = tool:GetAttribute("Uid") or tool:GetAttribute("uid")
-            if not uid then skipped += 1; continue end
+            if not uid then continue end
 
             if wearRemote then
                 pcall(function() wearRemote:InvokeServer(uid) end)
@@ -1518,19 +1390,17 @@ local function runAutoSellPet()
             end
 
             pcall(function() sellRemote:FireServer({uid}) end)
-            sold += 1
             task.wait(0.1)
         end
-
-        print(string.format("[SellPet] sold=%d skipped=%d unknown=%d", sold, skipped, unknown))
     end)
 end
 
 task.spawn(function()
     while true do
         task.wait(State.sellPetInterval or 5)
-        if not State.sellEnabled then continue end
-        pcall(runAutoSellPet)
+        if not State.sellEnabled then
+            pcall(runAutoSellPet)
+        end
     end
 end)
 
@@ -1543,16 +1413,8 @@ local function runCollectMoney()
             and ReplicatedStorage.Packages:FindFirstChild("Networking")
         if not net then return end
         local remote = net:FindFirstChild("RF/AwayEarnings/AskCollect")
-        if not remote then warn("[CollectMoney] remote not found"); return end
-        local ok, r1, r2, data = pcall(function()
-            return remote:InvokeServer({Kind = "Claim"})
-        end)
-        if ok and r1 == true then
-            local amount = data and data.AwardedAmount or 0
-            print(string.format("[CollectMoney] claimed: $%.0f", amount))
-        else
-            warn("[CollectMoney] failed:", tostring(r1))
-        end
+        if not remote then return end
+        remote:InvokeServer({Kind = "Claim"})
     end)
 end
 
@@ -1576,12 +1438,7 @@ local function shouldFavorite(tool)
     if isEgg and not State.favEggEnabled then return false end
 
     if next(State.favMinRarities) then
-        local rarity
-        if isPet then
-            rarity = PET_RARITY_MAP[tool.Name]
-        else
-            rarity = tool:GetAttribute("Rarity") or tool:GetAttribute("rarity")
-        end
+        local rarity = isPet and PET_RARITY_MAP[tool.Name] or (tool:GetAttribute("Rarity") or tool:GetAttribute("rarity"))
         if not rarity or not State.favMinRarities[rarity] then return false end
     end
 
@@ -1626,22 +1483,6 @@ local function favoriteTool(tool)
     return true
 end
 
-local function runAutoFavorite()
-    if not State.favPetEnabled and not State.favEggEnabled then return end
-    pcall(function()
-        local count = 0
-        for _, tool in ipairs(LocalPlayer.Backpack:GetChildren()) do
-            if shouldFavorite(tool) then
-                if favoriteTool(tool) then
-                    count += 1
-                    task.wait(0.05)
-                end
-            end
-        end
-        if count > 0 then print("[AutoFavorite] favorited:", count) end
-    end)
-end
-
 task.spawn(function()
     local bp = LocalPlayer:WaitForChild("Backpack", 10)
     if bp then
@@ -1649,9 +1490,7 @@ task.spawn(function()
             if not State.favPetEnabled and not State.favEggEnabled then return end
             task.wait(0.1)
             if shouldFavorite(tool) then
-                if favoriteTool(tool) then
-                    print("[AutoFavorite] fav new:", tool.Name)
-                end
+                favoriteTool(tool)
             end
         end)
     end
@@ -1682,7 +1521,7 @@ local function setReduceMap(enabled)
             lighting.GlobalShadows = false
             lighting.FogEnd = 9999
             lighting.FogStart = 9998
-            for _, obj in ipairs(game:GetService("Workspace"):GetDescendants()) do
+            for _, obj in ipairs(Workspace:GetDescendants()) do
                 pcall(function()
                     if obj:IsA("ParticleEmitter") or obj:IsA("Trail")
                     or obj:IsA("Beam") or obj:IsA("SelectionBox") then
@@ -1706,9 +1545,9 @@ local function setAntiAfk(enabled)
     if not enabled then return end
     _antiAfkConn = LocalPlayer.Idled:Connect(function()
         pcall(function()
-            game:GetService("VirtualUser"):Button2Down(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
+            game:GetService("VirtualUser"):Button2Down(Vector2.new(0,0), Workspace.CurrentCamera.CFrame)
             task.wait(1)
-            game:GetService("VirtualUser"):Button2Up(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
+            game:GetService("VirtualUser"):Button2Up(Vector2.new(0,0), Workspace.CurrentCamera.CFrame)
         end)
     end)
 end
@@ -1798,10 +1637,7 @@ local function farmCycle()
         local function doPlace()
             if not State.placeEnabled then return end
             if not PlotState then return end
-            if _speedBypassActive then startSpeedBypass(State.returnSpeed or 1000) end
-            local hPlace = hum(); if hPlace then hPlace.WalkSpeed = State.returnSpeed or 1000 end
-            walkTo(START_POS, 10, false)
-            if _speedBypassActive then stopSpeedBypass() end
+            walkTo(START_POS, 10, true)
             if not State.running then return end
             pcall(runAutoPlace)
         end
@@ -1842,7 +1678,6 @@ local function farmCycle()
         local h2claim = hum()
         if h2claim then h2claim.WalkSpeed = 0; h2claim:Move(Vector3.zero, false) end
         
-        -- Anti-void safe Y offset
         local safeClaimY = math.max(part.Position.Y + 3.2, r.Position.Y)
         pcall(function()
             r.CFrame = CFrame.new(part.Position.X, safeClaimY, part.Position.Z) * (r.CFrame - r.CFrame.Position)
@@ -1905,11 +1740,7 @@ local function farmCycle()
             task.wait(0.05)
         end
 
-        if _speedBypassActive then startSpeedBypass(State.returnSpeed or 1000) end
-        local h2ret = hum()
-        if h2ret then h2ret.WalkSpeed = State.returnSpeed or 1000 end
-        walkTo(START_POS, 10, false)
-        if _speedBypassActive then stopSpeedBypass() end
+        walkTo(START_POS, 10, true)
         if not State.running then State.busy = false; return end
         task.wait(1.5)
 
@@ -2107,7 +1938,7 @@ task.spawn(function()
 end)
 
 -- ============================================================
--- FITUR BARU LENGKAP (Haul, Codex, Fusery, Bloomery, Parasite)
+-- FULL NEW FEATURES (Haul, Codex, Fusery, Bloomery, Parasite)
 -- ============================================================
 
 -- HAUL
@@ -2153,7 +1984,7 @@ local function autoFuse(uid1, uid2, uid3)
     end
 end
 
--- BLOOMERY (Cherry Blossom) -- event-based, bukan polling
+-- BLOOMERY (Cherry Blossom)
 local _batTreeConn = nil
 local _bloomEventConn = nil
 local _bloomActive = false
@@ -2184,7 +2015,6 @@ local function isTreeObject(obj)
     return obj:IsA("BasePart") and (n:find("tree") or n:find("blossom") or n:find("cherry") or n:find("bloom"))
 end
 
--- Auto Bloomery -- event-based: listen ChildAdded di Workspace
 local function startAutoBloomery()
     if _bloomEventConn then _bloomEventConn:Disconnect() end
     _bloomActive = true
@@ -2332,7 +2162,7 @@ local function listenGuardWarning(cb)
 end
 
 -- ============================================================
--- LUNA INTERFACE SUITE (Auto-Fallback Loader & Fixed Config)
+-- LUNA INTERFACE SUITE
 -- ============================================================
 local Luna = nil
 local lunaUrls = {
@@ -2352,17 +2182,17 @@ for _, url in ipairs(lunaUrls) do
 end
 
 if not Luna then
-    warn("[Louis Hub] Gagal memuat Luna Interface Suite dari semua link GitHub!")
+    warn("[Louis Hub] Failed to load Luna Interface Suite!")
     return
 end
 
 local function Notify(title, text)
     pcall(function()
         Luna:Notification({
-            Title = title,
-            Icon = "notifications_active",
+            Title       = title,
+            Icon        = "notifications_active",
             ImageSource = "Material",
-            Content = text
+            Content     = text
         })
     end)
 end
@@ -2374,7 +2204,7 @@ local RARITIES = {
     "Eternal","Brainrot","Mythical","Exclusive"
 }
 
--- Window Definition dengan KeySettings lengkap agar tidak crash internal
+-- Window Definition
 local Window = Luna:CreateWindow({
     Name            = "Louis Hub",
     Subtitle        = "Steal An Egg",
@@ -2389,8 +2219,8 @@ local Window = Luna:CreateWindow({
     KeySystem   = false,
     KeySettings = {
         Title       = "Louis Hub",
-        Subtitle    = "Keyless",
-        Note        = "No Key Required",
+        Subtitle    = "Key System",
+        Note        = "Keyless",
         SaveInRoot  = false,
         SaveKey     = false,
         Key         = {"1234"}
@@ -2403,43 +2233,21 @@ Window:CreateHomeTab({
     Icon               = 1
 })
 
--- TABS
+-- ============================================================
+-- TAB 1: FARM (Using verified icon "view_in_ar")
+-- ============================================================
 local TabFarm = Window:CreateTab({
     Name        = "Farm",
-    Icon        = "agriculture",
+    Icon        = "view_in_ar",
     ImageSource = "Material",
     ShowTitle   = true
 })
 
-local TabAuto = Window:CreateTab({
-    Name        = "Auto",
-    Icon        = "smart_toy",
-    ImageSource = "Material",
-    ShowTitle   = true
-})
-
-local TabStore = Window:CreateTab({
-    Name        = "Store",
-    Icon        = "storefront",
-    ImageSource = "Material",
-    ShowTitle   = true
-})
-
-local TabMisc = Window:CreateTab({
-    Name        = "Misc",
-    Icon        = "build",
-    ImageSource = "Material",
-    ShowTitle   = true
-})
-
--- ------------------------------------------------------------
--- TAB: FARM
--- ------------------------------------------------------------
 TabFarm:CreateSection("Auto Steal")
 
 TabFarm:CreateToggle({
     Name         = "Auto Steal",
-    Description  = "Otomatis farming & mencuri telur",
+    Description  = nil,
     CurrentValue = false,
     Callback     = function(v)
         State.running = v
@@ -2464,21 +2272,21 @@ TabFarm:CreateToggle({
 
 TabFarm:CreateToggle({
     Name         = "Anti-Guard",
-    Description  = "Kecepatan maksimal saat kembali ke base",
+    Description  = nil,
     CurrentValue = true,
     Callback     = function(v) State.antiGuard = v end
 }, "AntiGuard")
 
 TabFarm:CreateToggle({
     Name         = "Bat Aura",
-    Description  = "Aura swing bat otomatis",
+    Description  = nil,
     CurrentValue = false,
     Callback     = function(v) State.batAura = v end
 }, "BatAura")
 
 TabFarm:CreateToggle({
     Name         = "No Knockback",
-    Description  = "Patch RE/RigSync/Refresh",
+    Description  = nil,
     CurrentValue = false,
     Callback     = function(v)
         State.noKnockback = v
@@ -2504,7 +2312,7 @@ TabFarm:CreateSlider({
 
 TabFarm:CreateDropdown({
     Name            = "Target Rarities",
-    Description     = "Pilih rarity telur yang dicuri",
+    Description     = nil,
     Options         = RARITIES,
     CurrentOption   = { "Common" },
     MultipleOptions = true,
@@ -2521,7 +2329,7 @@ TabFarm:CreateDropdown({
 
 TabFarm:CreateDropdown({
     Name            = "Target Areas",
-    Description     = "Pilih biome / area target",
+    Description     = nil,
     Options         = AREA_NAMES,
     CurrentOption   = { "Forest" },
     MultipleOptions = true,
@@ -2538,14 +2346,14 @@ TabFarm:CreateDropdown({
 
 TabFarm:CreateToggle({
     Name         = "Priority Rarity",
-    Description  = "Utamakan telur dengan rarity tertinggi",
+    Description  = nil,
     CurrentValue = true,
     Callback     = function(v) State.priorityRarity = v end
 }, "PriorityRarity")
 
 TabFarm:CreateDropdown({
     Name            = "Target Mutations",
-    Description     = "Filter mutasi telur",
+    Description     = nil,
     Options         = MUTATIONS,
     CurrentOption   = { "Golden" },
     MultipleOptions = true,
@@ -2562,28 +2370,34 @@ TabFarm:CreateDropdown({
 
 TabFarm:CreateInput({
     Name            = "Min Earning Rate",
+    Description     = nil,
     PlaceholderText = "0 = Off",
     CurrentValue    = "0",
     Numeric         = true,
-    Enter           = true,
+    MaxCharacters   = nil,
+    Enter           = false,
     Callback        = function(v) State.minEarningRate = tonumber(v) or 0 end
 }, "MinEarningRate")
 
 TabFarm:CreateInput({
     Name            = "Min Weight (kg)",
+    Description     = nil,
     PlaceholderText = "0 = Off",
     CurrentValue    = "0",
     Numeric         = true,
-    Enter           = true,
+    MaxCharacters   = nil,
+    Enter           = false,
     Callback        = function(v) State.minModelWeight = tonumber(v) or 0 end
 }, "MinWeight")
 
 TabFarm:CreateInput({
     Name            = "Max Weight (kg)",
+    Description     = nil,
     PlaceholderText = "0 = Off",
     CurrentValue    = "0",
     Numeric         = true,
-    Enter           = true,
+    MaxCharacters   = nil,
+    Enter           = false,
     Callback        = function(v)
         local n = tonumber(v) or 0
         State.maxModelWeight = n == 0 and 999999999 or n
@@ -2592,7 +2406,7 @@ TabFarm:CreateInput({
 
 TabFarm:CreateToggle({
     Name         = "Cycle Panel",
-    Description  = "Tampilkan timer 5 menit dan field eggs",
+    Description  = nil,
     CurrentValue = false,
     Callback     = function(v) _cycleGui.Enabled = v end
 }, "CyclePanel")
@@ -2601,7 +2415,7 @@ TabFarm:CreateSection("Auto Bloomery")
 
 TabFarm:CreateToggle({
     Name         = "Auto Bloomery",
-    Description  = "Deteksi pohon blossom dan pukul otomatis",
+    Description  = nil,
     CurrentValue = false,
     Callback     = function(v)
         if v then task.spawn(startAutoBloomery) else stopAutoBloomery() end
@@ -2610,19 +2424,19 @@ TabFarm:CreateToggle({
 
 TabFarm:CreateButton({
     Name        = "Equip Field Bat",
-    Description = "Ambil bat dari codex",
+    Description = nil,
     Callback    = function() pcall(wearFieldBat) end
 })
 
 TabFarm:CreateButton({
     Name        = "Gather Petal",
-    Description = "Ambil petal bunga sakura",
+    Description = nil,
     Callback    = function() pcall(gatherPetal) end
 })
 
 TabFarm:CreateButton({
     Name        = "Mutate Egg",
-    Description = "Mutasikan telur di bloomery",
+    Description = nil,
     Callback    = function() pcall(mutateEgg) end
 })
 
@@ -2630,7 +2444,7 @@ TabFarm:CreateSection("Monster Parasite")
 
 TabFarm:CreateToggle({
     Name         = "Auto Feed Parasite",
-    Description  = "Otomatis pasang parasite ke player terdekat",
+    Description  = nil,
     CurrentValue = false,
     Callback     = function(v)
         if v then startAutoFeedParasite() else stopAutoFeedParasite() end
@@ -2639,7 +2453,7 @@ TabFarm:CreateToggle({
 
 TabFarm:CreateDropdown({
     Name            = "Min Rarity (Parasite Egg)",
-    Description     = "Rarity telur parasite yang dipakai",
+    Description     = nil,
     Options         = RARITIES,
     CurrentOption   = { "Common" },
     MultipleOptions = true,
@@ -2656,21 +2470,28 @@ TabFarm:CreateDropdown({
 
 TabFarm:CreateButton({
     Name        = "Claim Parasite Chest",
-    Description = "Claim hadiah chest parasite",
+    Description = nil,
     Callback    = function()
         task.spawn(claimParasiteChest)
         Notify("Louis Hub", "Chest claimed!")
     end
 })
 
--- ------------------------------------------------------------
--- TAB: AUTO
--- ------------------------------------------------------------
+-- ============================================================
+-- TAB 2: AUTO (Using verified icon "dashboard")
+-- ============================================================
+local TabAuto = Window:CreateTab({
+    Name        = "Auto",
+    Icon        = "dashboard",
+    ImageSource = "Material",
+    ShowTitle   = true
+})
+
 TabAuto:CreateSection("Auto Place Egg")
 
 TabAuto:CreateToggle({
     Name         = "Enable Auto Place Egg",
-    Description  = "Taruh telur di plot secara otomatis",
+    Description  = nil,
     CurrentValue = false,
     Callback     = function(v) State.placeEnabled = v; if v then loadModules() end end
 }, "PlaceEgg")
@@ -2685,7 +2506,7 @@ TabAuto:CreateSlider({
 
 TabAuto:CreateDropdown({
     Name            = "Min Rarity Egg",
-    Description     = "Rarity minimal untuk ditaruh",
+    Description     = nil,
     Options         = RARITIES,
     CurrentOption   = { "Common" },
     MultipleOptions = true,
@@ -2710,7 +2531,7 @@ TabAuto:CreateDropdown({
 
 TabAuto:CreateButton({
     Name        = "Place Now",
-    Description = "Taruh telur sekarang",
+    Description = nil,
     Callback    = function()
         loadModules(); pcall(runAutoPlace); Notify("Louis Hub", "Place Triggered!")
     end
@@ -2720,6 +2541,7 @@ TabAuto:CreateSection("Auto Place Pet")
 
 TabAuto:CreateToggle({
     Name         = "Enable Auto Place Pet",
+    Description  = nil,
     CurrentValue = false,
     Callback     = function(v) State.placePetEnabled = v; if v then loadModules() end end
 }, "PlacePet")
@@ -2734,6 +2556,7 @@ TabAuto:CreateSlider({
 
 TabAuto:CreateButton({
     Name        = "Place Pet Now",
+    Description = nil,
     Callback    = function()
         loadModules(); pcall(runAutoPlacePet); Notify("Louis Hub", "Place Pet Triggered!")
     end
@@ -2743,6 +2566,7 @@ TabAuto:CreateSection("Auto Place Best Pet")
 
 TabAuto:CreateToggle({
     Name         = "Enable Best Pet Place",
+    Description  = nil,
     CurrentValue = false,
     Callback     = function(v) State.placeBestPetEnabled = v; if v then loadModules() end end
 }, "PlaceBestPet")
@@ -2757,6 +2581,7 @@ TabAuto:CreateSlider({
 
 TabAuto:CreateButton({
     Name        = "Place Best Now",
+    Description = nil,
     Callback    = function()
         loadModules(); pcall(runAutoPlaceBestPet); Notify("Louis Hub", "Place Best Triggered!")
     end
@@ -2766,6 +2591,7 @@ TabAuto:CreateSection("Auto Hatch")
 
 TabAuto:CreateToggle({
     Name         = "Enable Auto Hatch",
+    Description  = nil,
     CurrentValue = false,
     Callback     = function(v) State.hatchEnabled = v; if v then loadModules() end end
 }, "HatchEgg")
@@ -2780,6 +2606,7 @@ TabAuto:CreateSlider({
 
 TabAuto:CreateButton({
     Name        = "Hatch Now",
+    Description = nil,
     Callback    = function()
         loadModules(); pcall(runAutoHatch); Notify("Louis Hub", "Hatch Triggered!")
     end
@@ -2789,18 +2616,21 @@ TabAuto:CreateSection("Auto Favorite")
 
 TabAuto:CreateToggle({
     Name         = "Auto Favorite Pet",
+    Description  = nil,
     CurrentValue = false,
     Callback     = function(v) State.favPetEnabled = v end
 }, "FavPet")
 
 TabAuto:CreateToggle({
     Name         = "Auto Favorite Egg",
+    Description  = nil,
     CurrentValue = false,
     Callback     = function(v) State.favEggEnabled = v end
 }, "FavEgg")
 
 TabAuto:CreateDropdown({
     Name            = "Target Rarities",
+    Description     = nil,
     Options         = RARITIES,
     CurrentOption   = { "Common" },
     MultipleOptions = true,
@@ -2817,24 +2647,34 @@ TabAuto:CreateDropdown({
 
 TabAuto:CreateButton({
     Name        = "Favorite Now",
+    Description = nil,
     Callback    = function()
         pcall(runAutoFavorite); Notify("Louis Hub", "Favorite Done!")
     end
 })
 
--- ------------------------------------------------------------
--- TAB: STORE
--- ------------------------------------------------------------
+-- ============================================================
+-- TAB 3: STORE (Using verified icon "directions_run")
+-- ============================================================
+local TabStore = Window:CreateTab({
+    Name        = "Store",
+    Icon        = "directions_run",
+    ImageSource = "Material",
+    ShowTitle   = true
+})
+
 TabStore:CreateSection("Auto Sell Pet")
 
 TabStore:CreateToggle({
     Name         = "Enable Auto Sell Pet",
+    Description  = nil,
     CurrentValue = false,
     Callback     = function(v) State.sellEnabled = v; if v then loadModules() end end
 }, "SellPetEnable")
 
 TabStore:CreateToggle({
     Name         = "Sell Every Pet",
+    Description  = nil,
     CurrentValue = false,
     Callback     = function(v) State.sellAll = v end
 }, "SellEveryPet")
@@ -2849,6 +2689,7 @@ TabStore:CreateSlider({
 
 TabStore:CreateDropdown({
     Name            = "Sell Pet Rarities",
+    Description     = nil,
     Options         = RARITIES,
     CurrentOption   = { "Common" },
     MultipleOptions = true,
@@ -2865,6 +2706,7 @@ TabStore:CreateDropdown({
 
 TabStore:CreateButton({
     Name        = "Sell Pet Now",
+    Description = nil,
     Callback    = function()
         loadModules(); pcall(runAutoSellPet); Notify("Louis Hub", "Sell Pet Triggered!")
     end
@@ -2874,6 +2716,7 @@ TabStore:CreateSection("Auto Sell Egg")
 
 TabStore:CreateToggle({
     Name         = "Enable Auto Sell Egg",
+    Description  = nil,
     CurrentValue = false,
     Callback     = function(v) State.sellEggEnabled = v; if v then loadModules() end end
 }, "SellEggEnable")
@@ -2888,6 +2731,7 @@ TabStore:CreateSlider({
 
 TabStore:CreateDropdown({
     Name            = "Sell Egg Rarities",
+    Description     = nil,
     Options         = RARITIES,
     CurrentOption   = { "Common" },
     MultipleOptions = true,
@@ -2904,6 +2748,7 @@ TabStore:CreateDropdown({
 
 TabStore:CreateButton({
     Name        = "Sell Egg Now",
+    Description = nil,
     Callback    = function()
         loadModules(); pcall(runAutoSellEgg); Notify("Louis Hub", "Sell Egg Triggered!")
     end
@@ -2913,6 +2758,7 @@ TabStore:CreateSection("Collect Money")
 
 TabStore:CreateToggle({
     Name         = "Auto Collect Offline Earnings",
+    Description  = nil,
     CurrentValue = false,
     Callback     = function(v) State.collectEnabled = v end
 }, "CollectEnable")
@@ -2927,6 +2773,7 @@ TabStore:CreateSlider({
 
 TabStore:CreateButton({
     Name        = "Collect Now",
+    Description = nil,
     Callback    = function()
         pcall(runCollectMoney); Notify("Louis Hub", "Collected!")
     end
@@ -2936,16 +2783,19 @@ TabStore:CreateSection("Haul & Codex")
 
 TabStore:CreateButton({
     Name        = "Wear Best Pet",
+    Description = nil,
     Callback    = function() pcall(wearBest) end
 })
 
 TabStore:CreateButton({
     Name        = "Sell Full Satchel",
+    Description = nil,
     Callback    = function() pcall(sellFullSatchel) end
 })
 
 TabStore:CreateButton({
     Name        = "Redeem All Codex",
+    Description = nil,
     Callback    = function() pcall(redeemAllCodex) end
 })
 
@@ -2954,27 +2804,40 @@ TabStore:CreateSection("Fuse Machine")
 local _fuseUids = {}
 TabStore:CreateInput({
     Name            = "Pet UID 1",
+    Description     = nil,
     PlaceholderText = "Paste Pet UID 1",
     CurrentValue    = "",
+    Numeric         = false,
+    MaxCharacters   = nil,
+    Enter           = false,
     Callback        = function(v) _fuseUids[1] = v end
 }, "FuseUID1")
 
 TabStore:CreateInput({
     Name            = "Pet UID 2",
+    Description     = nil,
     PlaceholderText = "Paste Pet UID 2",
     CurrentValue    = "",
+    Numeric         = false,
+    MaxCharacters   = nil,
+    Enter           = false,
     Callback        = function(v) _fuseUids[2] = v end
 }, "FuseUID2")
 
 TabStore:CreateInput({
     Name            = "Pet UID 3",
+    Description     = nil,
     PlaceholderText = "Paste Pet UID 3",
     CurrentValue    = "",
+    Numeric         = false,
+    MaxCharacters   = nil,
+    Enter           = false,
     Callback        = function(v) _fuseUids[3] = v end
 }, "FuseUID3")
 
 TabStore:CreateButton({
     Name        = "Auto Fuse Pets",
+    Description = nil,
     Callback    = function()
         if _fuseUids[1] and _fuseUids[2] and _fuseUids[3] then
             task.spawn(function() autoFuse(_fuseUids[1], _fuseUids[2], _fuseUids[3]) end)
@@ -2985,13 +2848,21 @@ TabStore:CreateButton({
     end
 })
 
--- ------------------------------------------------------------
--- TAB: MISC
--- ------------------------------------------------------------
+-- ============================================================
+-- TAB 4: MISC (Using verified icon "settings")
+-- ============================================================
+local TabMisc = Window:CreateTab({
+    Name        = "Misc",
+    Icon        = "settings",
+    ImageSource = "Material",
+    ShowTitle   = true
+})
+
 TabMisc:CreateSection("Visual")
 
 TabMisc:CreateToggle({
     Name         = "Egg ESP",
+    Description  = nil,
     CurrentValue = false,
     Callback     = function(v)
         State.espEnabled = v
@@ -3001,6 +2872,7 @@ TabMisc:CreateToggle({
 
 TabMisc:CreateToggle({
     Name         = "Float (Visual)",
+    Description  = nil,
     CurrentValue = false,
     Callback     = function(v) State.floatEnabled = v; updateFloat() end
 }, "FloatToggle")
@@ -3015,42 +2887,49 @@ TabMisc:CreateSlider({
 
 TabMisc:CreateToggle({
     Name         = "Character Animation",
+    Description  = nil,
     CurrentValue = true,
     Callback     = function(v) State.animEnabled = v; updateAnim() end
 }, "CharAnim")
 
 TabMisc:CreateToggle({
     Name         = "FPS & Ping Counter",
+    Description  = nil,
     CurrentValue = false,
     Callback     = function(v) updateStatsGui(v) end
 }, "StatsGuiToggle")
 
 TabMisc:CreateToggle({
     Name         = "Reduce Map (Boost FPS)",
+    Description  = nil,
     CurrentValue = false,
     Callback     = function(v) State.reducedMap = v; setReduceMap(v) end
 }, "ReduceMapToggle")
 
 TabMisc:CreateButton({
-    Name     = "Upgrade Base",
-    Callback = function() upgradeBase() end
+    Name        = "Upgrade Base",
+    Description = nil,
+    Callback    = function() upgradeBase() end
 })
 
 TabMisc:CreateButton({
-    Name     = "Upgrade Treadmill",
-    Callback = function() upgradeTreadmill(1) end
+    Name        = "Upgrade Treadmill",
+    Description = nil,
+    Callback    = function() upgradeTreadmill(1) end
 })
 
 TabMisc:CreateSection("Utility")
 
 TabMisc:CreateToggle({
     Name         = "Anti AFK",
+    Description  = nil,
     CurrentValue = true,
     Callback     = function(v) State.antiAfk = v; setAntiAfk(v) end
 }, "AntiAFK")
 
 TabMisc:CreateToggle({
     Name         = "Anti Staff",
+    Description  = nil,
     CurrentValue = true,
     Callback     = function(v)
         if v then
@@ -3073,8 +2952,9 @@ TabMisc:CreateToggle({
 }, "AntiStaff")
 
 TabMisc:CreateButton({
-    Name     = "Rejoin Server",
-    Callback = function()
+    Name        = "Rejoin Server",
+    Description = nil,
+    Callback    = function()
         pcall(function()
             game:GetService("TeleportService"):TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer)
         end)
@@ -3082,8 +2962,9 @@ TabMisc:CreateButton({
 })
 
 TabMisc:CreateButton({
-    Name     = "Server Hop",
-    Callback = function()
+    Name        = "Server Hop",
+    Description = nil,
+    Callback    = function()
         pcall(function()
             local HS = game:GetService("HttpService")
             local TPS = game:GetService("TeleportService")
@@ -3104,8 +2985,9 @@ TabMisc:CreateButton({
 })
 
 TabMisc:CreateButton({
-    Name     = "Listen Guard Warning",
-    Callback = function()
+    Name        = "Listen Guard Warning",
+    Description = nil,
+    Callback    = function()
         listenGuardWarning(function(...) Notify("Louis Hub", "Guard Warning!") end)
     end
 })
@@ -3121,9 +3003,9 @@ TabMisc:CreateBind({
     OnChangedCallback = function() end
 }, "ToggleUIBind")
 
--- ------------------------------------------------------------
--- TAB: THEME & CONFIG
--- ------------------------------------------------------------
+-- ============================================================
+-- TAB 5 & 6: THEME & CONFIG
+-- ============================================================
 local ThemeTab = Window:CreateTab({
     Name        = "Theme",
     Icon        = "palette",
