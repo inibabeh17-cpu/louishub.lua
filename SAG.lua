@@ -159,7 +159,7 @@ local function loadModules()
 end
 
 -- ============================================================
--- STATE
+-- STATE (Speed Defaults: 500 towards egg, 1000 return)
 -- ============================================================
 local State = {
     -- Farm
@@ -167,9 +167,9 @@ local State = {
     busy                 = false,
     stealCount           = 0,
     lockedRecord         = nil,
-    -- Movement (TPWalk driven ONLY when running)
-    speed                = 120,
-    returnSpeed          = 180,
+    -- Movement
+    speed                = 500,
+    returnSpeed          = 1000,
     antiGuard            = true,
     -- Farm rarity filter
     targetRarities       = {},
@@ -425,7 +425,7 @@ local function upgradeTreadmill(id)
 end
 
 -- ============================================================
--- HUMANOID BYPASS (Spoofer - Clones & Destroys original)
+-- HUMANOID BYPASS (Spoofer)
 -- ============================================================
 local _camConn = nil
 local _speedConn = nil
@@ -569,7 +569,7 @@ local function walkTo(goal, timeout, isReturning, checkFn)
     if typeof(goal) == "Instance" then goal = goal.Position end
 
     timeout = timeout or 20
-    local speed      = isReturning and (State.antiGuard and (State.returnSpeed or 180) or State.speed) or State.speed
+    local speed = isReturning and (State.antiGuard and (State.returnSpeed or 1000) or State.speed) or State.speed
     local targetDist = 5
 
     -- Safe return snap with elevated Y
@@ -588,19 +588,19 @@ local function walkTo(goal, timeout, isReturning, checkFn)
         h2.WalkSpeed = 16; return true
     end
 
-    -- WalkSpeed normal 16 (clean BAC), TPWalk drives CFrame while State.running
+    -- Humanoid walkspeed normal 16 (clean BAC), TPWalk drives CFrame while State.running
     h2.WalkSpeed = 16
     h2:MoveTo(goal)
 
-    local t0       = workspace.DistributedGameTime
-    local lastPos  = r.Position
-    local stuckT   = t0
+    local t0 = workspace.DistributedGameTime
+    local lastPos = r.Position
+    local stuckT = t0
     local shouldContinue = checkFn or function() return State.running end
 
     while workspace.DistributedGameTime - t0 < timeout do
         if not shouldContinue() then break end
         local dt = RunService.Heartbeat:Wait()
-        r  = root(); h2 = hum()
+        r = root(); h2 = hum()
         if not r or not h2 then break end
 
         local dist = (r.Position - goal).Magnitude
@@ -646,14 +646,14 @@ local function walkTo(goal, timeout, isReturning, checkFn)
 end
 
 -- ============================================================
--- AERIAL RETURN (Glide above Guardian Reach)
+-- AERIAL RETURN (Glide above Guardian Reach at Speed 1000)
 -- ============================================================
 local function walkToAir(airGoal, timeout)
     local r = root()
     local h2 = hum()
     if not r or not h2 then return false end
     timeout = timeout or 10
-    local speed = State.antiGuard and (State.returnSpeed or 180) or State.speed
+    local speed = State.antiGuard and (State.returnSpeed or 1000) or State.speed
     local t0 = workspace.DistributedGameTime
 
     while workspace.DistributedGameTime - t0 < timeout do
@@ -665,7 +665,7 @@ local function walkToAir(airGoal, timeout)
         local delta = airGoal - r.Position
         local dist = delta.Magnitude
 
-        if dist <= 6 then
+        if dist <= 8 then
             r.AssemblyLinearVelocity = Vector3.zero
             break
         end
@@ -679,7 +679,7 @@ local function walkToAir(airGoal, timeout)
 end
 
 -- ============================================================
--- EGG FINDER (Enhanced reliable lookup)
+-- EGG FINDER
 -- ============================================================
 local function findBestEgg()
     if not loadModules() then return nil, nil end
@@ -1308,16 +1308,16 @@ local function runAutoSellEgg()
             sold += 1
             task.wait(0.1)
         end
+        if sold > 0 then print("[SellEgg] sold:", sold) end
     end)
 end
 
 task.spawn(function()
     while true do
         task.wait(State.sellEggInterval or 10)
-        if State.sellEggEnabled then
-            if not EggState then loadModules() end
-            pcall(runAutoSellEgg)
-        end
+        if not State.sellEggEnabled then continue end
+        if not EggState then loadModules() end
+        pcall(runAutoSellEgg)
     end
 end)
 
@@ -1648,7 +1648,7 @@ local function updateStatsGui(show)
 end
 
 -- ============================================================
--- FARM CYCLE (With Instant Anti-Guardian Air Escape)
+-- FARM CYCLE (Persistent Egg Steal & Zero-Delay Air Escape)
 -- ============================================================
 local function farmCycle()
     if State.busy or not State.running then return end
@@ -1660,7 +1660,7 @@ local function farmCycle()
         local r = root(); local h2 = hum()
         if not r or not h2 then State.busy = false; return end
 
-        if tick() - _busyStart > 30 then State.busy = false; return end
+        if tick() - _busyStart > 45 then State.busy = false; return end
 
         local function backpackEggCount()
             local count = 0
@@ -1689,38 +1689,19 @@ local function farmCycle()
         local rec, model = findBestEgg()
         if not rec or not model then
             State.lockedRecord = nil
-            if State.placeEnabled then
-                doPlace()
-            end
+            if State.placeEnabled then doPlace() end
             State.busy = false; return
         end
 
-        local part = model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart", true)
+        local function getEggPart(m)
+            if not m or not m.Parent then return nil end
+            return m.PrimaryPart or m:FindFirstChildWhichIsA("BasePart", true)
+        end
+
+        local part = getEggPart(model)
         if not part then State.lockedRecord = nil; State.busy = false; return end
 
-        if not walkTo(part.Position, 15, false) then State.busy = false; return end
-        if not State.running then State.busy = false; return end
-
-        r = root()
-        if not r then State.busy = false; return end
-        local dist = (r.Position - part.Position).Magnitude
-        if dist > 10 then State.busy = false; return end
-
-        local slotKey = nil
-        pcall(function()
-            if AreaEggSlotIdentity and rec.AreaId and rec.NestId then
-                slotKey = AreaEggSlotIdentity.SlotKey(rec.AreaId, rec.NestId)
-            end
-        end)
-
-        local safeClaimY = math.max(part.Position.Y + 3.2, r.Position.Y)
-        pcall(function()
-            r.CFrame = CFrame.new(part.Position.X, safeClaimY, part.Position.Z) * (r.CFrame - r.CFrame.Position)
-            r.AssemblyLinearVelocity = Vector3.zero
-            r.AssemblyAngularVelocity = Vector3.zero
-        end)
-
-        local function hasEgg()
+        local function isEggSecured()
             local char = LocalPlayer.Character
             if char then
                 for _, t in ipairs(char:GetChildren()) do
@@ -1737,39 +1718,95 @@ local function farmCycle()
             return false
         end
 
-        local function fireClaim()
+        local slotKey = nil
+        pcall(function()
+            if AreaEggSlotIdentity and rec.AreaId and rec.NestId then
+                slotKey = AreaEggSlotIdentity.SlotKey(rec.AreaId, rec.NestId)
+            end
+        end)
+
+        local function fireClaimFast(targetModel)
             pcall(function() EggState.CarryFieldEgg(rec.Uid, slotKey) end)
             pcall(function() EggState.CarryFieldEgg(rec.Uid) end)
-            for _, obj in ipairs(model:GetDescendants()) do
-                if obj:IsA("ProximityPrompt") then
-                    pcall(function()
-                        obj.Enabled = true
-                        obj.HoldDuration = 0
-                        if typeof(fireproximityprompt) == "function" then
-                            fireproximityprompt(obj, 0)
-                        end
-                        obj:InputHoldBegin()
-                        obj:InputHoldEnd()
-                    end)
+            if targetModel and targetModel.Parent then
+                for _, obj in ipairs(targetModel:GetDescendants()) do
+                    if obj:IsA("ProximityPrompt") then
+                        pcall(function()
+                            obj.Enabled = true
+                            obj.HoldDuration = 0
+                            if typeof(fireproximityprompt) == "function" then
+                                fireproximityprompt(obj, 0)
+                            end
+                            obj:InputHoldBegin()
+                            obj:InputHoldEnd()
+                        end)
+                    end
                 end
             end
         end
 
-        fireClaim()
-        local claimT = tick()
-        local attempts = 0
-        while tick() - claimT < 0.4 do
-            task.wait(0.02)
-            if hasEgg() then break end
-            if attempts < 2 and (tick() - claimT) > 0.15 then
-                fireClaim()
-                attempts += 1
+        -- PERSISTENT STEAL & RE-GRAB LOOP
+        -- Never leaves or returns to base until the targeted egg is in hand!
+        -- If guardian flings/hits us, immediately path back and grab again!
+        local stealTimeout = tick() + 35
+        while State.running and not isEggSecured() and (tick() < stealTimeout) do
+            local clientFolder = Workspace:FindFirstChild("AreaEggSlotsClient", true)
+            local curModel = clientFolder and (clientFolder:FindFirstChild(rec.Uid) or clientFolder:FindFirstChild(rec.Uid, true))
+            if not curModel then curModel = Workspace:FindFirstChild(rec.Uid, true) end
+            if not curModel then curModel = model end
+
+            local curPart = getEggPart(curModel)
+            if not curPart then
+                local okF, fieldData = pcall(function() return EggState.ReadFieldEggs() end)
+                local stillExists = false
+                if okF and fieldData and fieldData.Records then
+                    for _, rEntry in ipairs(fieldData.Records) do
+                        if rEntry.Uid == rec.Uid then
+                            stillExists = true; break
+                        end
+                    end
+                end
+                if not stillExists then break end
+                task.wait(0.1)
+            else
+                walkTo(curPart.Position, 8, false)
+                if not State.running then break end
+
+                r = root()
+                if r then
+                    local dist = (r.Position - curPart.Position).Magnitude
+                    if dist <= 12 then
+                        local safeClaimY = math.max(curPart.Position.Y + 3.2, r.Position.Y)
+                        pcall(function()
+                            r.CFrame = CFrame.new(curPart.Position.X, safeClaimY, curPart.Position.Z) * (r.CFrame - r.CFrame.Position)
+                            r.AssemblyLinearVelocity  = Vector3.zero
+                            r.AssemblyAngularVelocity = Vector3.zero
+                        end)
+
+                        fireClaimFast(curModel)
+
+                        local waitSecured = tick() + 0.25
+                        while tick() < waitSecured do
+                            RunService.Heartbeat:Wait()
+                            if isEggSecured() then break end
+                        end
+                    end
+                end
             end
+            task.wait(0.04)
         end
+
+        -- If egg despawned or taken by someone else, unlock and exit cycle
+        if not isEggSecured() then
+            State.lockedRecord = nil
+            State.busy = false
+            return
+        end
+
         State.lockedRecord = nil
 
-        -- STEP 5: INSTANT ANTI-GUARDIAN AIR LAUNCH
-        -- Pop character 22 studs into the air instantly above Guardian hit range
+        -- ZERO-DELAY ANTI-GUARDIAN LAUNCH
+        -- Immediately launch 22 studs into the sky to evade guardian hitboxes
         r = root()
         if r then
             pcall(function()
@@ -1780,10 +1817,16 @@ local function farmCycle()
             end)
         end
 
-        -- STEP 6: AERIAL RETURN TO BASE (Out of reach of all guardians)
+        -- AERIAL RETURN TO BASE AT SPEED 1000
         local skyGoal = Vector3.new(START_POS.X, math.max(START_POS.Y + 22, (r and r.Position.Y or (START_POS.Y + 22))), START_POS.Z)
         walkToAir(skyGoal, 10)
-        
+
+        -- If guardian somehow stripped egg during flight, loop back immediately
+        if not isEggSecured() and State.running then
+            State.busy = false
+            return
+        end
+
         -- Land safely at base
         r = root()
         if r then
@@ -1793,9 +1836,8 @@ local function farmCycle()
                 r.AssemblyAngularVelocity = Vector3.zero
             end)
         end
-        task.wait(0.5)
+        task.wait(0.2)
 
-        -- STEP 7: Auto unequip egg to backpack
         local charEq = LocalPlayer.Character
         if charEq then
             for _, t in ipairs(charEq:GetChildren()) do
@@ -1866,6 +1908,26 @@ local function createESP(model, uid, rarityCol, dispName, rarityName, earning)
         box.Parent                 = bb
         Instance.new("UICorner", box).CornerRadius = UDim.new(0, 3)
 
+        local grad = Instance.new("UIGradient")
+        grad.Transparency = NumberSequence.new({
+            NumberSequenceKeypoint.new(0,    1),
+            NumberSequenceKeypoint.new(0.15, 0.35),
+            NumberSequenceKeypoint.new(0.85, 0.35),
+            NumberSequenceKeypoint.new(1,    1),
+        })
+        grad.Parent = box
+
+        local pad = Instance.new("UIPadding", box)
+        pad.PaddingLeft  = UDim.new(0, 8)
+        pad.PaddingRight = UDim.new(0, 8)
+
+        local layout = Instance.new("UIListLayout", box)
+        layout.FillDirection       = Enum.FillDirection.Horizontal
+        layout.VerticalAlignment   = Enum.VerticalAlignment.Center
+        layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+        layout.Padding             = UDim.new(0, 3)
+        layout.SortOrder           = Enum.SortOrder.LayoutOrder
+
         local txt = Instance.new("TextLabel", box)
         txt.Name                   = "Text"
         txt.AutomaticSize          = Enum.AutomaticSize.X
@@ -1877,12 +1939,30 @@ local function createESP(model, uid, rarityCol, dispName, rarityName, earning)
         txt.RichText               = true
         txt.TextXAlignment         = Enum.TextXAlignment.Center
 
+        local line = Instance.new("Frame")
+        line.Name            = "Line"
+        line.Size            = UDim2.new(0, 1, 0, 10)
+        line.Position        = UDim2.new(0.5, 0, 0, 15)
+        line.AnchorPoint     = Vector2.new(0.5, 0)
+        line.BorderSizePixel = 0
+        line.ZIndex          = 1
+        line.Parent          = bb
+        local lg = Instance.new("UIGradient")
+        lg.Rotation    = 90
+        lg.Transparency = NumberSequence.new({
+            NumberSequenceKeypoint.new(0, 0),
+            NumberSequenceKeypoint.new(1, 1),
+        })
+        lg.Parent = line
+
         EspBillboards[uid] = bb
     end
 
     local hex = string.format("#%02X%02X%02X", math.floor(rarityCol.R * 255), math.floor(rarityCol.G * 255), math.floor(rarityCol.B * 255))
     local box2 = bb:FindFirstChild("Box")
     if box2 then
+        local line2 = bb:FindFirstChild("Line")
+        if line2 then line2.BackgroundColor3 = rarityCol end
         local txt2 = box2:FindFirstChild("Text")
         if txt2 then
             txt2.Text = string.format("<font color='#FFFFFF'>%s</font> <font color='%s'>%s</font> <font color='#B4FFB4'>$%s</font>", dispName, hex, rarityName, formatNumber(earning))
@@ -2313,17 +2393,17 @@ TabFarm:CreateToggle({
 
 TabFarm:CreateSlider({
     Name         = "Walk Speed (TPWalk)",
-    Range        = {16, 500},
+    Range        = {16, 1000},
     Increment    = 1,
-    CurrentValue = 120,
+    CurrentValue = 500,
     Callback     = function(v) State.speed = v end
 }, "SpeedSlider")
 
 TabFarm:CreateSlider({
     Name         = "Return Speed",
-    Range        = {16, 1000},
+    Range        = {16, 1500},
     Increment    = 1,
-    CurrentValue = 180,
+    CurrentValue = 1000,
     Callback     = function(v) State.returnSpeed = v end
 }, "ReturnSpeedSlider")
 
