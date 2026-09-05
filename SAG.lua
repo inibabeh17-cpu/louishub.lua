@@ -577,6 +577,7 @@ RunService.Heartbeat:Connect(function(dt)
     end
 end)
 
+-- TPWalk purely glides to destination without any instant teleportation
 local function walkTo(goal, timeout, isReturning, checkFn)
     local h2 = hum()
     local r  = root()
@@ -586,17 +587,6 @@ local function walkTo(goal, timeout, isReturning, checkFn)
     timeout = timeout or 20
     local speed      = isReturning and (State.antiGuard and (State.returnSpeed or 180) or State.speed) or State.speed
     local targetDist = 5
-
-    if isReturning then
-        r = root(); h2 = hum()
-        if r and h2 then
-            pcall(function() r.CFrame = CFrame.new(START_POS + Vector3.new(0, 3.2, 0)) end)
-            r.AssemblyLinearVelocity  = Vector3.zero
-            r.AssemblyAngularVelocity = Vector3.zero
-            h2.WalkSpeed = 16
-        end
-        return true
-    end
 
     if (r.Position - goal).Magnitude <= targetDist then
         h2.WalkSpeed = 16; return true
@@ -822,6 +812,7 @@ local function runAutoPlace()
             local ok3, res = pcall(function()
                 return placeRemote:InvokeServer({Uid = uid, LocalCFrame = localCFrame})
             end)
+            warn(">>>PLACE<<< ok="..tostring(ok3).." res="..tostring(res).." uid="..uid:sub(1,8))
             if ok3 and res == true then placed += 1 end
             task.wait(0.1)
         end
@@ -887,6 +878,7 @@ task.spawn(function()
                 pcall(function() h:ChangeState(Enum.HumanoidStateType.Jumping) end)
                 pcall(function() h:MoveTo(r.Position + Vector3.new(-vel.X, 0, -vel.Z).Unit * 10) end)
                 stuckTimer = 0
+                print("[AntiStuck] treadmill escape triggered, hVel=" .. math.floor(hVel))
             end
         else
             stuckTimer = 0
@@ -1517,7 +1509,7 @@ local function setReduceMap(enabled)
             lighting.GlobalShadows = false
             lighting.FogEnd = 9999
             lighting.FogStart = 9998
-            for _, obj in ipairs(game:GetService("Workspace"):GetDescendants()) do
+            for _, obj in ipairs(Workspace:GetDescendants()) do
                 pcall(function()
                     if obj:IsA("ParticleEmitter") or obj:IsA("Trail")
                     or obj:IsA("Beam") or obj:IsA("SelectionBox") then
@@ -1606,7 +1598,7 @@ local function updateStatsGui(show)
 end
 
 -- ============================================================
--- FARM CYCLE
+-- FARM CYCLE (Pure TPWalk Return - No Teleport)
 -- ============================================================
 local function farmCycle()
     if State.busy or not State.running then return end
@@ -1633,7 +1625,7 @@ local function farmCycle()
         local function doPlace()
             if not State.placeEnabled then return end
             if not PlotState then return end
-            walkTo(START_POS, 10, true)
+            walkTo(START_POS, 15, true)
             if not State.running then return end
             pcall(runAutoPlace)
         end
@@ -1674,7 +1666,6 @@ local function farmCycle()
         local h2claim = hum()
         if h2claim then h2claim.WalkSpeed = 0; h2claim:Move(Vector3.zero, false) end
         
-        -- Anti-void safe Y offset
         local safeClaimY = math.max(part.Position.Y + 3.2, r.Position.Y)
         pcall(function()
             r.CFrame = CFrame.new(part.Position.X, safeClaimY, part.Position.Z) * (r.CFrame - r.CFrame.Position)
@@ -1730,7 +1721,6 @@ local function farmCycle()
         end
         State.lockedRecord = nil
 
-        -- Step 5: Wait for rubberband
         local rbTimeout = tick() + 1.5
         while tick() < rbTimeout do
             local r3 = root(); if not r3 then break end
@@ -1738,19 +1728,9 @@ local function farmCycle()
             task.wait(0.05)
         end
 
-        -- Step 6: Return - FIRST run with TPWalk towards base, THEN teleport directly to base
-        walkTo(START_POS, 2.5, false)
-
-        r = root()
-        local h2ret = hum()
-        if r and h2ret then
-            pcall(function()
-                r.CFrame = CFrame.new(START_POS + Vector3.new(0, 3.2, 0))
-                r.AssemblyLinearVelocity  = Vector3.zero
-                r.AssemblyAngularVelocity = Vector3.zero
-            end)
-            h2ret.WalkSpeed = 16
-        end
+        -- Step 6: Return purely using TPWalk all the way back to base (Zero teleportation)
+        walkTo(START_POS, 20, true)
+        if not State.running then State.busy = false; return end
         task.wait(0.5)
 
         -- Step 7: Auto unequip egg to backpack
@@ -2221,7 +2201,6 @@ local AREA_OPTIONS = {
 
 local MUTATION_OPTIONS = {"All", "Silver", "Bloom", "Golden", "Rainbow", "Spirit Bloom"}
 
--- Window Definition
 local Window = Luna:CreateWindow({
     Name            = "Louis Hub",
     Subtitle        = "Steal An Egg",
@@ -2285,7 +2264,6 @@ TabFarm:CreateToggle({
             if _speedConn then _speedConn:Disconnect(); _speedConn = nil end
             stopSpeedBypass()
 
-            -- Cleanly restore normal humanoid & walking mechanics
             local h = hum()
             if h then
                 h.WalkSpeed = 16
