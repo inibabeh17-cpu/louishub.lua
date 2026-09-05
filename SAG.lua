@@ -168,15 +168,14 @@ local State = {
     busy              = false,
     stealCount        = 0,
     lockedRecord      = nil,
-    -- Movement (TPWalk driven)
+    -- Movement
     speed             = 120,
-    returnSpeed       = 180,
     antiGuard         = true,
-    tpWalkActive      = true,
     -- Farm rarity filter
     targetRarities    = {},
     priorityRarity    = true,
     targetAreas       = {},
+    returnSpeed       = 1000,
     minEarningRate    = 0,
     minModelWeight    = 0,
     maxModelWeight    = 999999999,
@@ -198,7 +197,6 @@ local State = {
     noKnockback       = false,
     -- Backpack threshold auto place
     _placing          = false,
-    placeThreshold    = 50,
     -- Collect Money
     collectEnabled    = false,
     collectInterval   = 60,
@@ -207,10 +205,6 @@ local State = {
     favEggEnabled     = false,
     favoriteInterval  = 30,
     favMinRarities    = {},  -- multi-select {[name]=true}
-    favMutations       = {},
-    favMinWeight       = 0,
-    favMaxWeight       = 0,
-    favMinValue        = 0,
     -- Auto Hatch (independent loop)
     hatchEnabled      = false,
     hatchInterval     = 3,
@@ -223,7 +217,6 @@ local State = {
     sellEggEnabled    = false,
     sellEggInterval   = 10,
     sellEggMaxRarities = {},
-    sellEggMaxRarity  = "All",
     -- Auto Sell Pet
     sellPetMaxRarities = {},
     sellPetInterval   = 5,
@@ -234,8 +227,6 @@ local State = {
     espEnabled        = false,
     -- Mutation filter
     targetMutations   = {}, -- {["Golden"]=true,...} empty=all
-    -- Parasite
-    parasiteMinRarities = {},
     -- Misc
     reducedMap        = false,
     antiAfk           = false,
@@ -258,6 +249,10 @@ local function hum()
     return c and c:FindFirstChildOfClass("Humanoid")
 end
 
+-- ============================================================
+-- EGG NAME LOOKUP BY RARITY (Source: IGN wiki + in-game confirmed)
+-- Tool di Backpack = nama pet saja (tanpa " Egg")
+-- ============================================================
 -- ============================================================
 -- RARITY ORDER (global)
 -- ============================================================
@@ -432,13 +427,18 @@ end
 -- ============================================================
 -- RARITY FILTER
 -- ============================================================
+-- ============================================================
+-- MUTATIONS (SAE confirmed: Silver 1.25x, Bloom 1.5x, Golden 2x, Rainbow 2.5x, Spirit Bloom 3x)
+-- ============================================================
 local MUTATIONS = {"Silver", "Bloom", "Golden", "Rainbow", "Spirit Bloom"}
 
 local function isMutationAllowed(record)
     if not next(State.targetMutations) then return true end
+    -- record.Mutations = {table} -- cek apakah ada mutasi yang match
     if not record or not record.Mutations then return false end
     if type(record.Mutations) ~= "table" then return false end
-    for mutName in pairs(State.targetMutations) do
+    for mutName, _ in pairs(State.targetMutations) do
+        -- Cek di mutations table
         for k, v in pairs(record.Mutations) do
             local name = type(k) == "string" and k or tostring(v)
             if name:lower():find(mutName:lower()) then return true end
@@ -520,7 +520,7 @@ local function upgradeTreadmill(id)
 end
 
 -- ============================================================
--- HUMANOID BYPASS (Spoofer Method)
+-- HUMANOID BYPASS
 -- ============================================================
 local _camConn = nil
 local _speedConn = nil
@@ -545,9 +545,9 @@ local function doHumanoidBypass()
         task.wait(0.05)
         origHum:Destroy()
 
-        -- Teleport ke StartPosition dengan safe vertical offset (+3.2 stud) agar tidak amblas ke lantai
+        -- Teleport ke StartPosition
         if rootPart and rootPart.Parent then
-            rootPart.CFrame                  = CFrame.new(START_POS + Vector3.new(0, 3.2, 0))
+            rootPart.CFrame                  = CFrame.new(START_POS)
             rootPart.AssemblyLinearVelocity  = Vector3.new(0, 35, 0)
             rootPart.AssemblyAngularVelocity = Vector3.zero
         end
@@ -574,24 +574,6 @@ LocalPlayer.CharacterAdded:Connect(function()
     if State.running then
         task.wait(0.3)
         doHumanoidBypass()
-    end
-end)
-
--- ============================================================
--- ANTI-VOID GUARDIAN (Mencegah jatuh tembus ke bawah map / void)
--- ============================================================
-task.spawn(function()
-    while true do
-        task.wait(0.2)
-        local r = root()
-        if r and r.Position.Y < 20 then
-            pcall(function()
-                r.AssemblyLinearVelocity  = Vector3.zero
-                r.AssemblyAngularVelocity = Vector3.zero
-                r.CFrame = CFrame.new(START_POS + Vector3.new(0, 4, 0))
-            end)
-            print("[AntiVoid] Karakter dicegah jatuh ke void! Posisi dikembalikan ke base.")
-        end
     end
 end)
 
@@ -660,24 +642,6 @@ local function updateAnim()
         stopAllAnims()
     end)
 end
-
--- ============================================================
--- TPWALK MANUAL CONTROLLER
--- ============================================================
-RunService.Heartbeat:Connect(function(dt)
-    if not State.running and State.tpWalkActive then
-        local c = LocalPlayer.Character
-        local h = c and c:FindFirstChildOfClass("Humanoid")
-        local r = c and c:FindFirstChild("HumanoidRootPart")
-        if h and r and h.MoveDirection.Magnitude > 0 then
-            local bonus = math.max(0, State.speed - 16)
-            r.CFrame = r.CFrame + (h.MoveDirection * bonus * dt)
-        end
-    end
-end)
-
--- ============================================================
--- MOVEMENT (walkTo dengan TPWalk CFrame & Natural Sliding Preserved)
 -- ============================================================
 local function walkTo(goal, timeout, isReturning, checkFn)
     local h2 = hum()
@@ -686,14 +650,14 @@ local function walkTo(goal, timeout, isReturning, checkFn)
     if typeof(goal) == "Instance" then goal = goal.Position end
 
     timeout = timeout or 20
-    local speed      = isReturning and (State.antiGuard and (State.returnSpeed or 180) or State.speed) or State.speed
+    local speed      = isReturning and (State.antiGuard and 1000 or State.speed) or State.speed
     local targetDist = 5  -- lebih besar biar ngerem lebih awal
 
-    -- Kalau returning ke base, langsung snap via CFrame (+ safe height offset agar tidak nembus lantai)
+    -- Kalau returning ke base, langsung snap via CFrame -- lebih reliable di speed tinggi
     if isReturning then
         r = root(); h2 = hum()
         if r and h2 then
-            pcall(function() r.CFrame = CFrame.new(START_POS + Vector3.new(0, 3.2, 0)) end)
+            pcall(function() r.CFrame = CFrame.new(START_POS) end)
             r.AssemblyLinearVelocity  = Vector3.zero
             r.AssemblyAngularVelocity = Vector3.zero
             h2.WalkSpeed = 16
@@ -705,8 +669,7 @@ local function walkTo(goal, timeout, isReturning, checkFn)
         h2.WalkSpeed = 16; return true
     end
 
-    -- WalkSpeed Humanoid dibiarkan di 16 (bebas deteksi WalkSpeed BAC)
-    h2.WalkSpeed = 16
+    h2.WalkSpeed = speed
     h2:MoveTo(goal)
 
     local t0       = workspace.DistributedGameTime
@@ -717,7 +680,7 @@ local function walkTo(goal, timeout, isReturning, checkFn)
 
     while workspace.DistributedGameTime - t0 < timeout do
         if not shouldContinue() then break end
-        local dt = RunService.Heartbeat:Wait()
+        task.wait(0.02)
         r  = root(); h2 = hum()
         if not r or not h2 then break end
 
@@ -726,23 +689,17 @@ local function walkTo(goal, timeout, isReturning, checkFn)
         if dist <= targetDist then
             h2.WalkSpeed = 0
             h2:Move(Vector3.zero, false)
-            -- Momentum gesekan alami tetap berjalan (kecuali yang licin)
-            r.AssemblyLinearVelocity  = r.AssemblyLinearVelocity * 0.5
+            r.AssemblyLinearVelocity  = Vector3.zero
             r.AssemblyAngularVelocity = Vector3.zero
             break
-        end
-
-        -- TPWalk CFrame stepping menuju target
-        local toGoal = Vector3.new(goal.X - r.Position.X, 0, goal.Z - r.Position.Z)
-        if toGoal.Magnitude > 0.1 then
-            local step = math.min(speed * dt, toGoal.Magnitude)
-            r.CFrame = r.CFrame + (toGoal.Unit * step)
         end
 
         -- Brake zone scale dengan speed, tidak di-cap
         local brake = math.max(speed * 0.08, 15)
         if dist <= brake then
-            speed = math.max(16, speed * (dist/brake)^1.5)
+            h2.WalkSpeed = math.max(16, speed * (dist/brake)^1.5)
+        else
+            h2.WalkSpeed = speed
         end
         h2:MoveTo(goal)
 
@@ -836,6 +793,9 @@ end
 
 -- ============================================================
 -- AUTO PLACE
+-- ============================================================
+-- ============================================================
+-- AUTO PLACE -- independent loop
 -- ============================================================
 local function runAutoPlace()
     if not PlotState then loadModules() end
@@ -940,10 +900,15 @@ local function runAutoPlace()
                 elseif rec.RarityNumber and type(rec.RarityNumber) == "number" then
                     rarNum = rec.RarityNumber
                 end
+                -- Debug rarity sekali
+                if rarNum == 0 then
+                    -- print("[AutoPlace] rarity unknown for uid:", uid:sub(1,8), "rec.Rarity:", type(rec.Rarity))
+                end
                 if rarNum > 0 and rarNum < minRarNum then continue end
             end
 
-            -- 1. Equip egg
+            -- 1. Equip egg -- sama kayak auto place pet (pindah tool ke Character)
+            -- Cari tool di backpack yang match uid atau ItemType=AssetEgg
             local eggTool = nil
             for _, t in ipairs(LocalPlayer.Backpack:GetChildren()) do
                 if t:IsA("Tool") then
@@ -958,6 +923,7 @@ local function runAutoPlace()
                 pcall(function() eggTool.Parent = LocalPlayer.Character end)
                 task.wait(0.2)
             elseif wearRemote then
+                -- Fallback remote
                 pcall(function() wearRemote:InvokeServer(uid) end)
                 task.wait(0.25)
             end
@@ -1017,17 +983,22 @@ task.spawn(function()
         local h    = char and char:FindFirstChildOfClass("Humanoid")
         if not r or not h then stuckTimer = 0; continue end
 
+        -- Cek apakah karakter di-push treadmill:
+        -- velocity horizontal tinggi tapi bukan karena kita yang gerak
         local vel   = r.AssemblyLinearVelocity
         local hVel  = Vector3.new(vel.X, 0, vel.Z).Magnitude
         local speed = h.WalkSpeed
 
+        -- Skip anti-stuck saat busy (sedang jalan ke/dari egg)
         if State.busy then stuckTimer = 0; continue end
 
+        -- Treadmill push: velocity horizontal jauh melebihi walkspeed
         local isTreadmillPush = hVel > (speed * 1.5) and hVel > 20
 
         if isTreadmillPush then
             stuckTimer += 1
             if stuckTimer >= 2 then
+                -- Force keluar: velocity berlawanan + ke atas + jump
                 pcall(function()
                     local opposite = Vector3.new(-vel.X, 60, -vel.Z).Unit * speed * 3
                     r.AssemblyLinearVelocity = opposite
@@ -1036,6 +1007,7 @@ task.spawn(function()
                 h.Sit           = false
                 h.Jump          = true
                 pcall(function() h:ChangeState(Enum.HumanoidStateType.Jumping) end)
+                -- Re-issue MoveTo ke tujuan terakhir
                 pcall(function() h:MoveTo(r.Position + Vector3.new(-vel.X, 0, -vel.Z).Unit * 10) end)
                 stuckTimer = 0
                 print("[AntiStuck] treadmill escape triggered, hVel=" .. math.floor(hVel))
@@ -1206,10 +1178,6 @@ task.spawn(function()
         end
     end
 end)
-
--- ============================================================
--- AUTO PLACE PET & BEST PET
--- ============================================================
 local function runAutoPlacePet()
     if not PlotState then loadModules() end
     if not PlotState then return end
@@ -1494,8 +1462,11 @@ task.spawn(function()
 end)
 
 -- ============================================================
+-- ============================================================
 -- AUTO FAVORITE PET -- event-based, filter rarity/mutasi/weight/value
 -- ============================================================
+
+-- Helper: cek apakah tool layak di-favorite
 local function shouldFavorite(tool)
     if not tool:IsA("Tool") then return false end
     local itype = tool:GetAttribute("ItemType")
@@ -1760,9 +1731,6 @@ task.spawn(function()
         pcall(runAutoSellPet)
     end
 end)
-
--- ============================================================
--- BAT AURA
 -- ============================================================
 task.spawn(function()
     while true do
@@ -1904,8 +1872,13 @@ local function farmCycle()
         local function doPlace()
             if not State.placeEnabled then return end
             if not PlotState then return end
-            walkTo(START_POS, 10, true)
+            -- Jalan ke SAFE_POS dulu
+            if _speedBypassActive then startSpeedBypass(State.returnSpeed or 1000) end
+            local hPlace = hum(); if hPlace then hPlace.WalkSpeed = State.returnSpeed or 1000 end
+            walkTo(START_POS, 10, false)
+            if _speedBypassActive then stopSpeedBypass() end
             if not State.running then return end
+            -- Baru place
             pcall(runAutoPlace)
         end
 
@@ -1950,14 +1923,8 @@ local function farmCycle()
         -- Stop total sebelum claim
         local h2claim = hum()
         if h2claim then h2claim.WalkSpeed = 0; h2claim:Move(Vector3.zero, false) end
-        
-        -- Anti-void safe Y offset saat claim (agar pinggang tidak tertanam di lantai sarang)
-        local safeClaimY = math.max(part.Position.Y + 3.2, r.Position.Y)
-        pcall(function()
-            r.CFrame = CFrame.new(part.Position.X, safeClaimY, part.Position.Z) * (r.CFrame - r.CFrame.Position)
-            r.AssemblyLinearVelocity  = Vector3.zero
-            r.AssemblyAngularVelocity = Vector3.zero
-        end)
+        r.AssemblyLinearVelocity  = Vector3.zero
+        r.AssemblyAngularVelocity = Vector3.zero
 
         local function hasEgg()
             local char = LocalPlayer.Character
@@ -2016,8 +1983,12 @@ local function farmCycle()
             task.wait(0.05)
         end
 
-        -- Step 6: Balik ke SAFE_POS via TPWalk
-        walkTo(START_POS, 10, true)
+        -- Step 6: Balik ke SAFE_POS
+        if _speedBypassActive then startSpeedBypass(State.returnSpeed or 1000) end
+        local h2ret = hum()
+        if h2ret then h2ret.WalkSpeed = State.returnSpeed or 1000 end
+        walkTo(START_POS, 10, false)
+        if _speedBypassActive then stopSpeedBypass() end
         if not State.running then State.busy = false; return end
         -- task.wait biar server tau kita udah di safe zone
         task.wait(1.5)
@@ -2219,7 +2190,10 @@ task.spawn(function()
     end
 end)
 
--- ============================================================
+
+
+
+
 -- FITUR BARU (dari New dex SAE.txt)
 -- ============================================================
 
@@ -2456,6 +2430,7 @@ local function listenGuardWarning(cb)
     print("[Guard] listening")
 end
 
+
 -- ============================================================
 -- WISNU UI
 -- ============================================================
@@ -2513,15 +2488,16 @@ secSteal:AddToggle({ Title = "Auto Steal", Default = false, Callback = function(
         if _speedConn then _speedConn:Disconnect(); _speedConn = nil end
         stopSpeedBypass()
         Notify("SAE","Farm stopped.",2)
+        task.delay(0.3, function() pcall(function() LocalPlayer:LoadCharacter() end) end)
     end
 end })
 secSteal:AddToggle({ Title = "Anti-Guard", Default = true, Callback = function(v) State.antiGuard = v end })
 secSteal:AddToggle({ Title = "Bat Aura", Default = false, Callback = function(v) State.batAura = v end })
 secSteal:AddToggle({ Title = "No Knockback", Default = false,
     Callback = function(v) State.noKnockback = v; if v then applyNoKnockback() end end })
-secSteal:AddSlider({ Title = "Walk Speed (TPWalk)", Min = 16, Max = 500, Default = 120, Increment = 1,
+secSteal:AddSlider({ Title = "Walk Speed", Min = 16, Max = 500, Default = 120, Increment = 1,
     Callback = function(v) State.speed = v end })
-secSteal:AddSlider({ Title = "Return Speed", Min = 16, Max = 1000, Default = 180, Increment = 1,
+secSteal:AddSlider({ Title = "Return Speed", Min = 16, Max = 1000, Default = 1000, Increment = 1,
     Callback = function(v) State.returnSpeed = v end })
 secSteal:AddDropdown({ Title = "Target Rarities", Options = RARITIES, Default = {}, Multi = true,
     Callback = function(v) State.targetRarities = {}; for _,s in ipairs(v) do State.targetRarities[s]=true end end })
@@ -2617,7 +2593,7 @@ secSell:AddSlider({ Title = "Interval (s)", Min = 1, Max = 120, Default = 5, Inc
     Callback = function(v) State.sellInterval = v end })
 secSell:AddDropdown({ Title = "Sell Pet Rarities", Options = RARITIES, Default = {}, Multi = true,
     Callback = function(v) State.sellPetMaxRarities = {}; for _,s in ipairs(v) do State.sellPetMaxRarities[s]=true end end })
-secSell:AddButton({ Title = "Sell Pet Now", Callback = function() loadModules(); pcall(runAutoSellPet); Notify("Sell","Triggered!",2) end })
+secSell:AddButton({ Title = "Sell Pet Now", Callback = function() loadModules(); pcall(runAutoSell); Notify("Sell","Triggered!",2) end })
 
 local secSellEgg = Sec(Tabs.Store, "Auto Sell Egg")
 secSellEgg:AddToggle({ Title = "Enable", Default = false,
