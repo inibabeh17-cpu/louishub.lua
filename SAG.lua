@@ -164,6 +164,7 @@ end
 local State = {
     -- Farm
     running           = false,
+    instantSteal      = false,
     busy              = false,
     stealCount        = 0,
     lockedRecord      = nil,
@@ -171,7 +172,7 @@ local State = {
     speed             = 120,
     returnSpeed       = 180,
     antiGuard         = true,
-    tpWalkActive      = true,
+    tpWalkActive      = false,
     -- Farm rarity filter
     targetRarities    = {},
     priorityRarity    = true,
@@ -290,6 +291,33 @@ local AREA_NAMES = {
 local AREA_SET = {}
 for _, a in ipairs(AREA_NAMES) do AREA_SET[a] = true end
 
+local function getEggsFromBackpack(minRarity)
+    local result = {}
+    local minNum = RARITY_ORDER[minRarity] or 0
+    for _, tool in ipairs(LocalPlayer.Backpack:GetChildren()) do
+        if not tool:IsA("Tool") then continue end
+        local itemType = tool:GetAttribute("ItemType")
+        local isEgg = (itemType == "AssetEgg" or itemType == "PetEgg") or AREA_SET[tool.Name]
+        if not isEgg then continue end
+        local rarNum = 0
+        local rarity = "Unknown"
+        local rarAttr = tool:GetAttribute("Rarity") or tool:GetAttribute("rarity")
+        if rarAttr and RARITY_ORDER[rarAttr] then
+            rarity = rarAttr
+            rarNum = RARITY_ORDER[rarAttr]
+        end
+        if minNum <= 0 or rarNum >= minNum or rarNum == 0 then
+            table.insert(result, {
+                tool    = tool,
+                name    = tool.Name,
+                rarity  = rarity,
+                rarNum  = rarNum,
+            })
+        end
+    end
+    return result
+end
+
 local function formatNumber(n)
     n = tonumber(n) or 0
     if n >= 1e9  then return string.format("%.1fB", n/1e9)
@@ -354,8 +382,9 @@ end
 local MUTATIONS = {"Silver", "Bloom", "Golden", "Rainbow", "Spirit Bloom"}
 
 local function isMutationAllowed(record)
-    if not next(State.targetMutations) or State.targetMutations["All"] then return true end
-    if not record or not record.Mutations or type(record.Mutations) ~= "table" then return false end
+    if not next(State.targetMutations) then return true end
+    if not record or not record.Mutations then return false end
+    if type(record.Mutations) ~= "table" then return false end
     for mutName in pairs(State.targetMutations) do
         for k, v in pairs(record.Mutations) do
             local name = type(k) == "string" and k or tostring(v)
@@ -366,7 +395,7 @@ local function isMutationAllowed(record)
 end
 
 local function isRarityAllowed(record)
-    if not next(State.targetRarities) or State.targetRarities["All"] then return true end
+    if not next(State.targetRarities) then return true end
     local name = getRarityName(record)
     if not name or name == "Unknown" then return true end
     if State.targetRarities[name] then return true end
@@ -388,7 +417,7 @@ local function isValueAllowed(record)
 end
 
 local function isAreaAllowed(rec)
-    if not next(State.targetAreas) or State.targetAreas["All"] then return true end
+    if not next(State.targetAreas) then return true end
     local areaId = tostring(rec.AreaId or "")
     if State.targetAreas[areaId] then return true end
     local cat = tostring(rec.AssetCategory or "")
@@ -425,9 +454,11 @@ local function upgradeTreadmill(id)
 end
 
 -- ============================================================
--- HUMANOID BYPASS (Spoofer Method)
+-- HUMANOID BYPASS (Spoofer & Restoration Engine)
 -- ============================================================
 local _camConn = nil
+local _clonedHum = nil
+local _originalHumBackup = nil
 
 local function doHumanoidBypass()
     local char = LocalPlayer.Character
@@ -438,15 +469,18 @@ local function doHumanoidBypass()
     if not origHum or not rootPart then return end
 
     pcall(function()
+        _originalHumBackup = origHum
         local clone = origHum:Clone()
-        clone.WalkSpeed   = origHum.WalkSpeed
+        clone.WalkSpeed   = 16
         clone.JumpPower   = origHum.JumpPower
         clone.MaxHealth   = origHum.MaxHealth
         clone.Health      = origHum.Health
         clone.AutoRotate  = origHum.AutoRotate
         clone.DisplayName = origHum.DisplayName
         clone.Parent      = char
+        _clonedHum = clone
         task.wait(0.05)
+
         origHum:Destroy()
 
         if rootPart and rootPart.Parent then
@@ -459,12 +493,6 @@ local function doHumanoidBypass()
         clone.PlatformStand = false
         clone.Sit           = false
         pcall(function() clone:ChangeState(Enum.HumanoidStateType.Running) end)
-        workspace.CurrentCamera.CameraSubject = clone
-
-        pcall(function()
-            local PlayerModule = require(LocalPlayer.PlayerScripts:WaitForChild("PlayerModule"))
-            PlayerModule:GetControls():Enable()
-        end)
     end)
 
     if _camConn then _camConn:Disconnect() end
@@ -472,14 +500,31 @@ local function doHumanoidBypass()
         local c = LocalPlayer.Character
         if not c then return end
         local h2 = c:FindFirstChildOfClass("Humanoid")
-        if h2 and Workspace.CurrentCamera.CameraSubject ~= h2 then
+        if h2 then
             pcall(function() Workspace.CurrentCamera.CameraSubject = h2 end)
         end
     end)
+
+    State.tpWalkActive = true
+end
+
+local function restoreOriginalHumanoid()
+    State.tpWalkActive = false
+    if _camConn then _camConn:Disconnect(); _camConn = nil end
+    local char = LocalPlayer.Character
+    if not char then return end
+    local h = char:FindFirstChildOfClass("Humanoid")
+    if h then
+        h.WalkSpeed = 16
+        h.PlatformStand = false
+        h.Sit = false
+        pcall(function() h:ChangeState(Enum.HumanoidStateType.Running) end)
+        workspace.CurrentCamera.CameraSubject = h
+    end
 end
 
 LocalPlayer.CharacterAdded:Connect(function()
-    if State.running then
+    if State.running or State.instantSteal then
         task.wait(0.3)
         doHumanoidBypass()
     end
@@ -498,7 +543,7 @@ task.spawn(function()
                 r.AssemblyAngularVelocity = Vector3.zero
                 r.CFrame = CFrame.new(START_POS + Vector3.new(0, 4, 0))
             end)
-            print("[AntiVoid] Prevented falling into void! Safely returned to base.")
+            print("[AntiVoid] Saved from void! Teleported to base.")
         end
     end
 end)
@@ -531,15 +576,15 @@ local _animConn   = nil
 local function stopAllAnims()
     local c = LocalPlayer.Character
     if not c then return end
-    local humPart = c:FindFirstChildOfClass("Humanoid")
-    if not humPart then return end
-    local animator = humPart:FindFirstChildOfClass("Animator")
+    local hum = c:FindFirstChildOfClass("Humanoid")
+    if not hum then return end
+    local animator = hum:FindFirstChildOfClass("Animator")
     if animator then
         for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
             pcall(function() track:Stop(0) end)
         end
     end
-    for _, track in ipairs(humPart:GetPlayingAnimationTracks()) do
+    for _, track in ipairs(hum:GetPlayingAnimationTracks()) do
         pcall(function() track:Stop(0) end)
     end
     for _, obj in ipairs(c:GetDescendants()) do
@@ -565,8 +610,9 @@ end
 -- ============================================================
 -- TPWALK MANUAL & MOVEMENT
 -- ============================================================
+-- TPWalk ONLY active if Auto Steal or Instant Steal is running
 RunService.Heartbeat:Connect(function(dt)
-    if not State.running and State.tpWalkActive then
+    if (State.running or State.instantSteal) and State.tpWalkActive then
         local c = LocalPlayer.Character
         local h = c and c:FindFirstChildOfClass("Humanoid")
         local r = c and c:FindFirstChild("HumanoidRootPart")
@@ -577,7 +623,6 @@ RunService.Heartbeat:Connect(function(dt)
     end
 end)
 
--- TPWalk purely glides to destination without any instant teleportation
 local function walkTo(goal, timeout, isReturning, checkFn)
     local h2 = hum()
     local r  = root()
@@ -587,6 +632,17 @@ local function walkTo(goal, timeout, isReturning, checkFn)
     timeout = timeout or 20
     local speed      = isReturning and (State.antiGuard and (State.returnSpeed or 180) or State.speed) or State.speed
     local targetDist = 5
+
+    if isReturning then
+        r = root(); h2 = hum()
+        if r and h2 then
+            pcall(function() r.CFrame = CFrame.new(START_POS + Vector3.new(0, 3.2, 0)) end)
+            r.AssemblyLinearVelocity  = Vector3.zero
+            r.AssemblyAngularVelocity = Vector3.zero
+            h2.WalkSpeed = 16
+        end
+        return true
+    end
 
     if (r.Position - goal).Magnitude <= targetDist then
         h2.WalkSpeed = 16; return true
@@ -598,7 +654,7 @@ local function walkTo(goal, timeout, isReturning, checkFn)
     local t0       = workspace.DistributedGameTime
     local lastPos  = r.Position
     local stuckT   = t0
-    local shouldContinue = checkFn or function() return State.running end
+    local shouldContinue = checkFn or function() return State.running or State.instantSteal end
 
     while workspace.DistributedGameTime - t0 < timeout do
         if not shouldContinue() then break end
@@ -645,9 +701,51 @@ local function walkTo(goal, timeout, isReturning, checkFn)
 end
 
 -- ============================================================
+-- EGG DROPPED CHECK & RE-CLAIM
+-- ============================================================
+local function hasEgg()
+    local char = LocalPlayer.Character
+    if char then
+        for _, t in ipairs(char:GetChildren()) do
+            if t:IsA("Tool") and (t:GetAttribute("ItemType") == "AssetEgg"
+                or t:GetAttribute("ItemType") == "PetEgg"
+                or AREA_SET[t.Name]) then return true end
+        end
+    end
+    for _, t in ipairs(LocalPlayer.Backpack:GetChildren()) do
+        if t:IsA("Tool") and (t:GetAttribute("ItemType") == "AssetEgg"
+            or t:GetAttribute("ItemType") == "PetEgg"
+            or AREA_SET[t.Name]) then return true end
+    end
+    return false
+end
+
+local function checkAndRecoverDroppedEgg(targetPosition)
+    if hasEgg() then return true end
+    local r = root()
+    if not r then return false end
+
+    -- Check for dropped tool/egg parts in Workspace nearby
+    for _, obj in ipairs(Workspace:GetChildren()) do
+        if obj:IsA("Tool") and (obj:GetAttribute("ItemType") == "AssetEgg" or AREA_SET[obj.Name]) then
+            local handle = obj:FindFirstChild("Handle") or obj:FindFirstChildWhichIsA("BasePart")
+            if handle and (handle.Position - r.Position).Magnitude < 25 then
+                pcall(function()
+                    r.CFrame = CFrame.new(handle.Position + Vector3.new(0, 3, 0))
+                    task.wait(0.1)
+                end)
+                if hasEgg() then return true end
+            end
+        end
+    end
+    return false
+end
+
+-- ============================================================
 -- EGG FINDER
 -- ============================================================
 local function findBestEgg()
+    if not EggState then loadModules() end
     if not EggState then return nil, nil end
     local ok, fieldEggs = pcall(function() return EggState.ReadFieldEggs() end)
     if not ok or not fieldEggs or not fieldEggs.Records then return nil, nil end
@@ -772,7 +870,12 @@ local function runAutoPlace()
 
         for k, rec in pairs(owned) do
             if placed >= MAX_PER_RUN then break end
-            local uid = type(k) == "string" and k or (type(rec) == "table" and rec.Uid)
+            local uid
+            if type(k) == "string" then
+                uid = k
+            elseif type(rec) == "table" and rec.Uid then
+                uid = rec.Uid
+            end
             if not uid or type(k) ~= "string" then continue end
 
             if rec.Placement ~= nil then
@@ -812,7 +915,6 @@ local function runAutoPlace()
             local ok3, res = pcall(function()
                 return placeRemote:InvokeServer({Uid = uid, LocalCFrame = localCFrame})
             end)
-            warn(">>>PLACE<<< ok="..tostring(ok3).." res="..tostring(res).." uid="..uid:sub(1,8))
             if ok3 and res == true then placed += 1 end
             task.wait(0.1)
         end
@@ -845,12 +947,11 @@ end)
 -- ANTI-STUCK TREADMILL
 -- ============================================================
 task.spawn(function()
-    local lastGoalDist = math.huge
     local stuckTimer   = 0
     while true do
         task.wait(0.5)
-        if not State.running and not State.busy then
-            stuckTimer = 0; lastGoalDist = math.huge; continue
+        if not State.running and not State.busy and not State.instantSteal then
+            stuckTimer = 0; continue
         end
         local char = LocalPlayer.Character
         local r    = char and char:FindFirstChild("HumanoidRootPart")
@@ -878,7 +979,6 @@ task.spawn(function()
                 pcall(function() h:ChangeState(Enum.HumanoidStateType.Jumping) end)
                 pcall(function() h:MoveTo(r.Position + Vector3.new(-vel.X, 0, -vel.Z).Unit * 10) end)
                 stuckTimer = 0
-                print("[AntiStuck] treadmill escape triggered, hVel=" .. math.floor(hVel))
             end
         else
             stuckTimer = 0
@@ -1087,13 +1187,11 @@ local function runAutoPlacePet()
             end)
             if ok3 and res then
                 placed += 1
-                print("[AutoPlacePet] placed:", tool.Name)
             else
                 pcall(function() tool.Parent = LocalPlayer.Backpack end)
             end
             task.wait(0.1)
         end
-        print(string.format("[AutoPlacePet] total placed=%d", placed))
     end)
 end
 
@@ -1211,9 +1309,7 @@ local function runAutoHatch()
                 task.wait(0.05)
             end
             if AskFinishHatch then
-                local ok, r1, r2, petUid = pcall(function()
-                    return AskFinishHatch:InvokeServer(uid)
-                end)
+                pcall(function() AskFinishHatch:InvokeServer(uid) end)
                 task.wait(0.05)
             end
         end
@@ -1401,8 +1497,7 @@ local function runCollectMoney()
             and ReplicatedStorage.Packages:FindFirstChild("Networking")
         if not net then return end
         local remote = net:FindFirstChild("RF/AwayEarnings/AskCollect")
-        if not remote then return end
-        remote:InvokeServer({Kind = "Claim"})
+        if remote then remote:InvokeServer({Kind = "Claim"}) end
     end)
 end
 
@@ -1425,12 +1520,12 @@ local function shouldFavorite(tool)
     if isPet and not State.favPetEnabled then return false end
     if isEgg and not State.favEggEnabled then return false end
 
-    if next(State.favMinRarities) and not State.favMinRarities["All"] then
+    if next(State.favMinRarities) then
         local rarity = isPet and PET_RARITY_MAP[tool.Name] or (tool:GetAttribute("Rarity") or tool:GetAttribute("rarity"))
         if not rarity or not State.favMinRarities[rarity] then return false end
     end
 
-    if State.favMutations and next(State.favMutations) and not State.favMutations["All"] then
+    if State.favMutations and next(State.favMutations) then
         local mut = tool:GetAttribute("Mutations")
         local hasMut = false
         if type(mut) == "string" then
@@ -1509,7 +1604,7 @@ local function setReduceMap(enabled)
             lighting.GlobalShadows = false
             lighting.FogEnd = 9999
             lighting.FogStart = 9998
-            for _, obj in ipairs(Workspace:GetDescendants()) do
+            for _, obj in ipairs(game:GetService("Workspace"):GetDescendants()) do
                 pcall(function()
                     if obj:IsA("ParticleEmitter") or obj:IsA("Trail")
                     or obj:IsA("Beam") or obj:IsA("SelectionBox") then
@@ -1533,9 +1628,9 @@ local function setAntiAfk(enabled)
     if not enabled then return end
     _antiAfkConn = LocalPlayer.Idled:Connect(function()
         pcall(function()
-            game:GetService("VirtualUser"):Button2Down(Vector2.new(0,0), Workspace.CurrentCamera.CFrame)
+            game:GetService("VirtualUser"):Button2Down(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
             task.wait(1)
-            game:GetService("VirtualUser"):Button2Up(Vector2.new(0,0), Workspace.CurrentCamera.CFrame)
+            game:GetService("VirtualUser"):Button2Up(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
         end)
     end)
 end
@@ -1598,7 +1693,49 @@ local function updateStatsGui(show)
 end
 
 -- ============================================================
--- FARM CYCLE (Pure TPWalk Return - No Teleport)
+-- CLAIM INTERACTION HELPER
+-- ============================================================
+local function interactClaimEgg(rec, model)
+    local slotKey = nil
+    pcall(function()
+        if AreaEggSlotIdentity and rec.AreaId and rec.NestId then
+            slotKey = AreaEggSlotIdentity.SlotKey(rec.AreaId, rec.NestId)
+        end
+    end)
+
+    local function fireClaim()
+        pcall(function() EggState.CarryFieldEgg(rec.Uid, slotKey) end)
+        pcall(function() EggState.CarryFieldEgg(rec.Uid) end)
+        for _, obj in ipairs(model:GetDescendants()) do
+            if obj:IsA("ProximityPrompt") then
+                pcall(function()
+                    obj.Enabled = true
+                    obj.HoldDuration = 0
+                    if typeof(fireproximityprompt) == "function" then
+                        fireproximityprompt(obj, 0)
+                    end
+                    obj:InputHoldBegin()
+                    obj:InputHoldEnd()
+                end)
+            end
+        end
+    end
+
+    fireClaim()
+    local claimT = tick()
+    local attempts = 0
+    while tick() - claimT < 0.8 do
+        task.wait()
+        if hasEgg() then break end
+        if attempts < 4 and (tick() - claimT) > (attempts + 1) * 0.12 then
+            fireClaim()
+            attempts += 1
+        end
+    end
+end
+
+-- ============================================================
+-- FARM CYCLE (Auto Steal)
 -- ============================================================
 local function farmCycle()
     if State.busy or not State.running then return end
@@ -1625,7 +1762,7 @@ local function farmCycle()
         local function doPlace()
             if not State.placeEnabled then return end
             if not PlotState then return end
-            walkTo(START_POS, 15, true)
+            walkTo(START_POS, 10, true)
             if not State.running then return end
             pcall(runAutoPlace)
         end
@@ -1639,9 +1776,7 @@ local function farmCycle()
         local rec, model = findBestEgg()
         if not rec or not model then
             State.lockedRecord = nil
-            if State.placeEnabled then
-                doPlace()
-            end
+            if State.placeEnabled then doPlace() end
             State.busy = false; return
         end
 
@@ -1653,19 +1788,10 @@ local function farmCycle()
 
         r = root()
         if not r then State.busy = false; return end
-        local dist = (r.Position - part.Position).Magnitude
-        if dist > 10 then State.busy = false; return end
-
-        local slotKey = nil
-        pcall(function()
-            if AreaEggSlotIdentity and rec.AreaId and rec.NestId then
-                slotKey = AreaEggSlotIdentity.SlotKey(rec.AreaId, rec.NestId)
-            end
-        end)
 
         local h2claim = hum()
         if h2claim then h2claim.WalkSpeed = 0; h2claim:Move(Vector3.zero, false) end
-        
+
         local safeClaimY = math.max(part.Position.Y + 3.2, r.Position.Y)
         pcall(function()
             r.CFrame = CFrame.new(part.Position.X, safeClaimY, part.Position.Z) * (r.CFrame - r.CFrame.Position)
@@ -1673,53 +1799,13 @@ local function farmCycle()
             r.AssemblyAngularVelocity = Vector3.zero
         end)
 
-        local function hasEgg()
-            local char = LocalPlayer.Character
-            if char then
-                for _, t in ipairs(char:GetChildren()) do
-                    if t:IsA("Tool") and (t:GetAttribute("ItemType") == "AssetEgg"
-                        or t:GetAttribute("ItemType") == "PetEgg"
-                        or AREA_SET[t.Name]) then return true end
-                end
-            end
-            for _, t in ipairs(LocalPlayer.Backpack:GetChildren()) do
-                if t:IsA("Tool") and (t:GetAttribute("ItemType") == "AssetEgg"
-                    or t:GetAttribute("ItemType") == "PetEgg"
-                    or AREA_SET[t.Name]) then return true end
-            end
-            return false
-        end
-
-        local function fireClaim()
-            pcall(function() EggState.CarryFieldEgg(rec.Uid, slotKey) end)
-            pcall(function() EggState.CarryFieldEgg(rec.Uid) end)
-            for _, obj in ipairs(model:GetDescendants()) do
-                if obj:IsA("ProximityPrompt") then
-                    pcall(function()
-                        obj.Enabled = true
-                        obj.HoldDuration = 0
-                        if typeof(fireproximityprompt) == "function" then
-                            fireproximityprompt(obj, 0)
-                        end
-                        obj:InputHoldBegin()
-                        obj:InputHoldEnd()
-                    end)
-                end
-            end
-        end
-
-        fireClaim()
-        local claimT = tick()
-        local attempts = 0
-        while tick() - claimT < 0.5 do
-            task.wait()
-            if hasEgg() then break end
-            if attempts < 3 and (tick() - claimT) > (attempts + 1) * 0.12 then
-                fireClaim()
-                attempts += 1
-            end
-        end
+        interactClaimEgg(rec, model)
         State.lockedRecord = nil
+
+        -- Check if dropped right after claiming
+        if not hasEgg() then
+            checkAndRecoverDroppedEgg(part.Position)
+        end
 
         local rbTimeout = tick() + 1.5
         while tick() < rbTimeout do
@@ -1728,12 +1814,16 @@ local function farmCycle()
             task.wait(0.05)
         end
 
-        -- Step 6: Return purely using TPWalk all the way back to base (Zero teleportation)
-        walkTo(START_POS, 20, true)
+        walkTo(START_POS, 10, true)
         if not State.running then State.busy = false; return end
-        task.wait(0.5)
 
-        -- Step 7: Auto unequip egg to backpack
+        -- Recovery check if dropped upon returning
+        if not hasEgg() then
+            checkAndRecoverDroppedEgg(START_POS)
+        end
+
+        task.wait(1.5)
+
         local charEq = LocalPlayer.Character
         if charEq then
             for _, t in ipairs(charEq:GetChildren()) do
@@ -1750,6 +1840,81 @@ local function farmCycle()
 
     local h2 = hum()
     if h2 then h2.WalkSpeed = 16 end
+    State.busy = false
+end
+
+-- ============================================================
+-- INSTANT STEAL CYCLE (Instant Teleport to Egg & Back)
+-- ============================================================
+local function instantStealCycle()
+    if State.busy or not State.instantSteal then return end
+    State.busy = true
+    local _busyStart = tick()
+
+    pcall(function()
+        if not loadModules() then State.busy = false; return end
+        local r = root()
+        if not r then State.busy = false; return end
+
+        if tick() - _busyStart > 20 then State.busy = false; return end
+
+        local rec, model = findBestEgg()
+        if not rec or not model then
+            State.lockedRecord = nil
+            State.busy = false; return
+        end
+
+        local part = model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart", true)
+        if not part then State.lockedRecord = nil; State.busy = false; return end
+
+        -- 1. Instant Teleport to Egg target (with safety vertical height)
+        local safeClaimY = math.max(part.Position.Y + 3.2, r.Position.Y)
+        pcall(function()
+            r.CFrame = CFrame.new(part.Position.X, safeClaimY, part.Position.Z) * (r.CFrame - r.CFrame.Position)
+            r.AssemblyLinearVelocity  = Vector3.zero
+            r.AssemblyAngularVelocity = Vector3.zero
+        end)
+        task.wait(0.1)
+
+        -- 2. Claim egg
+        interactClaimEgg(rec, model)
+        State.lockedRecord = nil
+
+        -- 3. Check if egg dropped upon claim
+        if not hasEgg() then
+            checkAndRecoverDroppedEgg(part.Position)
+        end
+
+        task.wait(0.15)
+
+        -- 4. Instant Teleport back to safe base
+        pcall(function()
+            r.CFrame = CFrame.new(START_POS + Vector3.new(0, 3.5, 0))
+            r.AssemblyLinearVelocity  = Vector3.zero
+            r.AssemblyAngularVelocity = Vector3.zero
+        end)
+        task.wait(0.2)
+
+        -- 5. Recovery check if dropped during return
+        if not hasEgg() then
+            checkAndRecoverDroppedEgg(START_POS)
+        end
+
+        -- 6. Unequip egg to backpack
+        local charEq = LocalPlayer.Character
+        if charEq then
+            for _, t in ipairs(charEq:GetChildren()) do
+                if t:IsA("Tool") and (t:GetAttribute("ItemType") == "AssetEgg"
+                    or t:GetAttribute("ItemType") == "PetEgg"
+                    or AREA_SET[t.Name]) then
+                    pcall(function() t.Parent = LocalPlayer.Backpack end)
+                end
+            end
+        end
+
+        State.stealCount += 1
+    end)
+
     State.busy = false
 end
 
@@ -1928,7 +2093,7 @@ task.spawn(function()
 end)
 
 -- ============================================================
--- FULL EXTRA SYSTEMS
+-- FULL NEW FEATURES (Haul, Codex, Fusery, Bloomery, Parasite)
 -- ============================================================
 
 -- HAUL
@@ -2097,7 +2262,7 @@ local function startAutoFeedParasite()
                 for uid, rec in pairs(owned) do
                     if type(uid) ~= "string" then continue end
                     if not rec.HasParasite then continue end
-                    if next(State.parasiteMinRarities) and not State.parasiteMinRarities["All"] then
+                    if next(State.parasiteMinRarities) then
                         local rarName = getRarityName(rec)
                         if not State.parasiteMinRarities[rarName] then continue end
                     end
@@ -2187,20 +2352,14 @@ local function Notify(title, text)
     end)
 end
 
-local RARITIES_OPTIONS = {
-    "All", "Common","Uncommon","Rare","Epic","Legendary","Mythic",
+local RARITIES = {
+    "Common","Uncommon","Rare","Epic","Legendary","Mythic",
     "SuperRare","Exotic","Limited","Divine","Secret","Titan",
     "Cosmic","Celestial","Transcendent","Prismatic","Rainbow",
     "Eternal","Brainrot","Mythical","Exclusive"
 }
 
-local AREA_OPTIONS = {
-    "All", "Forest","Lake","Desert","Jungle","Snow","Volcano",
-    "Abyss Ocean","Prehistoric","Cosmic","Cherry Blossom","Titan Temple"
-}
-
-local MUTATION_OPTIONS = {"All", "Silver", "Bloom", "Golden", "Rainbow", "Spirit Bloom"}
-
+-- Window Definition
 local Window = Luna:CreateWindow({
     Name            = "Louis Hub",
     Subtitle        = "Steal An Egg",
@@ -2239,71 +2398,79 @@ local TabFarm = Window:CreateTab({
     ShowTitle   = true
 })
 
-TabFarm:CreateSection("Auto Steal")
+TabFarm:CreateSection("Steal Eggs")
 
 TabFarm:CreateToggle({
     Name         = "Auto Steal",
-    Description  = nil,
+    Description  = "Automatically farm eggs via pathing & TPWalk",
     CurrentValue = false,
     Callback     = function(v)
         State.running = v
         if v then
+            State.instantSteal = false
             if not _speedBypassActive then pcall(initSpeedBypass) end
             loadModules()
             doHumanoidBypass()
-            Notify("Louis Hub", "Farm started!")
+            Notify("Louis Hub", "Auto Steal started!")
             task.spawn(function()
                 walkTo(START_POS, 10, false)
                 while State.running do farmCycle(); task.wait(0.05) end
             end)
         else
-            State.running = false
-            State.busy = false
-            State.lockedRecord = nil
-            if _camConn then _camConn:Disconnect(); _camConn = nil end
-            if _speedConn then _speedConn:Disconnect(); _speedConn = nil end
-            stopSpeedBypass()
-
-            local h = hum()
-            if h then
-                h.WalkSpeed = 16
-                h.PlatformStand = false
-                h.Sit = false
-                pcall(function() h:ChangeState(Enum.HumanoidStateType.Running) end)
-                pcall(function() Workspace.CurrentCamera.CameraSubject = h end)
+            State.running = false; State.busy = false; State.lockedRecord = nil
+            if not State.instantSteal then
+                restoreOriginalHumanoid()
             end
-            local r = root()
-            if r then
-                r.AssemblyLinearVelocity = Vector3.zero
-                r.AssemblyAngularVelocity = Vector3.zero
-            end
-            pcall(function()
-                local PlayerModule = require(LocalPlayer.PlayerScripts:WaitForChild("PlayerModule"))
-                PlayerModule:GetControls():Enable()
-            end)
-
-            Notify("Louis Hub", "Farm stopped.")
+            Notify("Louis Hub", "Auto Steal stopped.")
         end
     end
 }, "AutoSteal")
 
 TabFarm:CreateToggle({
+    Name         = "Instant Steal",
+    Description  = "Instantly teleport to target egg and back to base",
+    CurrentValue = false,
+    Callback     = function(v)
+        State.instantSteal = v
+        if v then
+            State.running = false
+            if not _speedBypassActive then pcall(initSpeedBypass) end
+            loadModules()
+            doHumanoidBypass()
+            Notify("Louis Hub", "Instant Steal started!")
+            task.spawn(function()
+                while State.instantSteal do
+                    instantStealCycle()
+                    task.wait(0.1)
+                end
+            end)
+        else
+            State.instantSteal = false; State.busy = false; State.lockedRecord = nil
+            if not State.running then
+                restoreOriginalHumanoid()
+            end
+            Notify("Louis Hub", "Instant Steal stopped.")
+        end
+    end
+}, "InstantSteal")
+
+TabFarm:CreateToggle({
     Name         = "Anti-Guard",
-    Description  = nil,
+    Description  = "Increased return speed to avoid guards",
     CurrentValue = true,
     Callback     = function(v) State.antiGuard = v end
 }, "AntiGuard")
 
 TabFarm:CreateToggle({
     Name         = "Bat Aura",
-    Description  = nil,
+    Description  = "Automatically swings bat to defend",
     CurrentValue = false,
     Callback     = function(v) State.batAura = v end
 }, "BatAura")
 
 TabFarm:CreateToggle({
     Name         = "No Knockback",
-    Description  = nil,
+    Description  = "Patches RigSync/Refresh events",
     CurrentValue = false,
     Callback     = function(v)
         State.noKnockback = v
@@ -2329,18 +2496,16 @@ TabFarm:CreateSlider({
 
 TabFarm:CreateDropdown({
     Name            = "Target Rarities",
-    Description     = nil,
-    Options         = RARITIES_OPTIONS,
-    CurrentOption   = { "All" },
+    Description     = "Filter specific egg rarities to steal",
+    Options         = RARITIES,
+    CurrentOption   = { "Common" },
     MultipleOptions = true,
     SpecialType     = nil,
     Callback        = function(opts)
         State.targetRarities = {}
         if type(opts) == "table" then
-            for _, s in ipairs(opts) do
-                if s ~= "All" then State.targetRarities[s] = true end
-            end
-        elseif type(opts) == "string" and opts ~= "All" then
+            for _, s in ipairs(opts) do State.targetRarities[s] = true end
+        elseif type(opts) == "string" then
             State.targetRarities[opts] = true
         end
     end
@@ -2348,18 +2513,16 @@ TabFarm:CreateDropdown({
 
 TabFarm:CreateDropdown({
     Name            = "Target Areas",
-    Description     = nil,
-    Options         = AREA_OPTIONS,
-    CurrentOption   = { "All" },
+    Description     = "Filter specific biome zones",
+    Options         = AREA_NAMES,
+    CurrentOption   = { "Forest" },
     MultipleOptions = true,
     SpecialType     = nil,
     Callback        = function(opts)
         State.targetAreas = {}
         if type(opts) == "table" then
-            for _, s in ipairs(opts) do
-                if s ~= "All" then State.targetAreas[s] = true end
-            end
-        elseif type(opts) == "string" and opts ~= "All" then
+            for _, s in ipairs(opts) do State.targetAreas[s] = true end
+        elseif type(opts) == "string" then
             State.targetAreas[opts] = true
         end
     end
@@ -2367,25 +2530,23 @@ TabFarm:CreateDropdown({
 
 TabFarm:CreateToggle({
     Name         = "Priority Rarity",
-    Description  = nil,
+    Description  = "Always target highest rarity available first",
     CurrentValue = true,
     Callback     = function(v) State.priorityRarity = v end
 }, "PriorityRarity")
 
 TabFarm:CreateDropdown({
     Name            = "Target Mutations",
-    Description     = nil,
-    Options         = MUTATION_OPTIONS,
-    CurrentOption   = { "All" },
+    Description     = "Filter egg mutations",
+    Options         = MUTATIONS,
+    CurrentOption   = { "Golden" },
     MultipleOptions = true,
     SpecialType     = nil,
     Callback        = function(opts)
         State.targetMutations = {}
         if type(opts) == "table" then
-            for _, s in ipairs(opts) do
-                if s ~= "All" then State.targetMutations[s] = true end
-            end
-        elseif type(opts) == "string" and opts ~= "All" then
+            for _, s in ipairs(opts) do State.targetMutations[s] = true end
+        elseif type(opts) == "string" then
             State.targetMutations[opts] = true
         end
     end
@@ -2429,7 +2590,7 @@ TabFarm:CreateInput({
 
 TabFarm:CreateToggle({
     Name         = "Cycle Panel",
-    Description  = nil,
+    Description  = "Toggle the 5-minute countdown and records panel",
     CurrentValue = false,
     Callback     = function(v) _cycleGui.Enabled = v end
 }, "CyclePanel")
@@ -2438,7 +2599,7 @@ TabFarm:CreateSection("Auto Bloomery")
 
 TabFarm:CreateToggle({
     Name         = "Auto Bloomery",
-    Description  = nil,
+    Description  = "Detects blossom trees and strikes automatically",
     CurrentValue = false,
     Callback     = function(v)
         if v then task.spawn(startAutoBloomery) else stopAutoBloomery() end
@@ -2467,7 +2628,7 @@ TabFarm:CreateSection("Monster Parasite")
 
 TabFarm:CreateToggle({
     Name         = "Auto Feed Parasite",
-    Description  = nil,
+    Description  = "Automatically equips parasite egg & feeds nearest players",
     CurrentValue = false,
     Callback     = function(v)
         if v then startAutoFeedParasite() else stopAutoFeedParasite() end
@@ -2477,17 +2638,15 @@ TabFarm:CreateToggle({
 TabFarm:CreateDropdown({
     Name            = "Min Rarity (Parasite Egg)",
     Description     = nil,
-    Options         = RARITIES_OPTIONS,
-    CurrentOption   = { "All" },
+    Options         = RARITIES,
+    CurrentOption   = { "Common" },
     MultipleOptions = true,
     SpecialType     = nil,
     Callback        = function(opts)
         State.parasiteMinRarities = {}
         if type(opts) == "table" then
-            for _, s in ipairs(opts) do
-                if s ~= "All" then State.parasiteMinRarities[s] = true end
-            end
-        elseif type(opts) == "string" and opts ~= "All" then
+            for _, s in ipairs(opts) do State.parasiteMinRarities[s] = true end
+        elseif type(opts) == "string" then
             State.parasiteMinRarities[opts] = true
         end
     end
@@ -2532,13 +2691,25 @@ TabAuto:CreateSlider({
 TabAuto:CreateDropdown({
     Name            = "Min Rarity Egg",
     Description     = nil,
-    Options         = RARITIES_OPTIONS,
-    CurrentOption   = { "All" },
-    MultipleOptions = false,
+    Options         = RARITIES,
+    CurrentOption   = { "Common" },
+    MultipleOptions = true,
     SpecialType     = nil,
     Callback        = function(opts)
-        local choice = type(opts) == "table" and opts[1] or opts
-        State.placeMinRarity = choice or "All"
+        local minNum = 999
+        if type(opts) == "table" then
+            for _, k in ipairs(opts) do
+                if RARITY_ORDER[k] then minNum = math.min(minNum, RARITY_ORDER[k]) end
+            end
+        elseif type(opts) == "string" and RARITY_ORDER[opts] then
+            minNum = RARITY_ORDER[opts]
+        end
+        State.placeMinRarity = minNum < 999 and (function()
+            for k in pairs(RARITY_ORDER) do
+                if RARITY_ORDER[k] == minNum then return k end
+            end
+            return "All"
+        end)() or "All"
     end
 }, "PlaceMinRarity")
 
@@ -2644,17 +2815,15 @@ TabAuto:CreateToggle({
 TabAuto:CreateDropdown({
     Name            = "Target Rarities",
     Description     = nil,
-    Options         = RARITIES_OPTIONS,
-    CurrentOption   = { "All" },
+    Options         = RARITIES,
+    CurrentOption   = { "Common" },
     MultipleOptions = true,
     SpecialType     = nil,
     Callback        = function(opts)
         State.favMinRarities = {}
         if type(opts) == "table" then
-            for _, s in ipairs(opts) do
-                if s ~= "All" then State.favMinRarities[s] = true end
-            end
-        elseif type(opts) == "string" and opts ~= "All" then
+            for _, s in ipairs(opts) do State.favMinRarities[s] = true end
+        elseif type(opts) == "string" then
             State.favMinRarities[opts] = true
         end
     end
@@ -2705,17 +2874,15 @@ TabStore:CreateSlider({
 TabStore:CreateDropdown({
     Name            = "Sell Pet Rarities",
     Description     = nil,
-    Options         = RARITIES_OPTIONS,
-    CurrentOption   = { "All" },
+    Options         = RARITIES,
+    CurrentOption   = { "Common" },
     MultipleOptions = true,
     SpecialType     = nil,
     Callback        = function(opts)
         State.sellPetMaxRarities = {}
         if type(opts) == "table" then
-            for _, s in ipairs(opts) do
-                if s ~= "All" then State.sellPetMaxRarities[s] = true end
-            end
-        elseif type(opts) == "string" and opts ~= "All" then
+            for _, s in ipairs(opts) do State.sellPetMaxRarities[s] = true end
+        elseif type(opts) == "string" then
             State.sellPetMaxRarities[opts] = true
         end
     end
@@ -2749,17 +2916,15 @@ TabStore:CreateSlider({
 TabStore:CreateDropdown({
     Name            = "Sell Egg Rarities",
     Description     = nil,
-    Options         = RARITIES_OPTIONS,
-    CurrentOption   = { "All" },
+    Options         = RARITIES,
+    CurrentOption   = { "Common" },
     MultipleOptions = true,
     SpecialType     = nil,
     Callback        = function(opts)
         State.sellEggMaxRarities = {}
         if type(opts) == "table" then
-            for _, s in ipairs(opts) do
-                if s ~= "All" then State.sellEggMaxRarities[s] = true end
-            end
-        elseif type(opts) == "string" and opts ~= "All" then
+            for _, s in ipairs(opts) do State.sellEggMaxRarities[s] = true end
+        elseif type(opts) == "string" then
             State.sellEggMaxRarities[opts] = true
         end
     end
@@ -2959,6 +3124,8 @@ TabMisc:CreateToggle({
                             local badge = p:GetAttribute("IsStaff") or p:GetAttribute("Staff")
                             if badge then
                                 State.running = false
+                                State.instantSteal = false
+                                restoreOriginalHumanoid()
                                 Notify("Louis Hub", "Staff detected: " .. p.Name)
                             end
                         end
@@ -3056,6 +3223,8 @@ task.spawn(function()
                     local badge = p:GetAttribute("IsStaff") or p:GetAttribute("Staff")
                     if badge then
                         State.running = false
+                        State.instantSteal = false
+                        restoreOriginalHumanoid()
                         Notify("Louis Hub", "Staff in server: " .. p.Name)
                     end
                 end
