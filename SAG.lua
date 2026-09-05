@@ -354,9 +354,8 @@ end
 local MUTATIONS = {"Silver", "Bloom", "Golden", "Rainbow", "Spirit Bloom"}
 
 local function isMutationAllowed(record)
-    if not next(State.targetMutations) then return true end
-    if not record or not record.Mutations then return false end
-    if type(record.Mutations) ~= "table" then return false end
+    if not next(State.targetMutations) or State.targetMutations["All"] then return true end
+    if not record or not record.Mutations or type(record.Mutations) ~= "table" then return false end
     for mutName in pairs(State.targetMutations) do
         for k, v in pairs(record.Mutations) do
             local name = type(k) == "string" and k or tostring(v)
@@ -367,7 +366,7 @@ local function isMutationAllowed(record)
 end
 
 local function isRarityAllowed(record)
-    if not next(State.targetRarities) then return true end
+    if not next(State.targetRarities) or State.targetRarities["All"] then return true end
     local name = getRarityName(record)
     if not name or name == "Unknown" then return true end
     if State.targetRarities[name] then return true end
@@ -389,7 +388,7 @@ local function isValueAllowed(record)
 end
 
 local function isAreaAllowed(rec)
-    if not next(State.targetAreas) then return true end
+    if not next(State.targetAreas) or State.targetAreas["All"] then return true end
     local areaId = tostring(rec.AreaId or "")
     if State.targetAreas[areaId] then return true end
     local cat = tostring(rec.AssetCategory or "")
@@ -426,10 +425,9 @@ local function upgradeTreadmill(id)
 end
 
 -- ============================================================
--- HUMANOID BYPASS (Spoofer)
+-- HUMANOID BYPASS (Spoofer Method)
 -- ============================================================
 local _camConn = nil
-local _speedConn = nil
 
 local function doHumanoidBypass()
     local char = LocalPlayer.Character
@@ -461,6 +459,12 @@ local function doHumanoidBypass()
         clone.PlatformStand = false
         clone.Sit           = false
         pcall(function() clone:ChangeState(Enum.HumanoidStateType.Running) end)
+        workspace.CurrentCamera.CameraSubject = clone
+
+        pcall(function()
+            local PlayerModule = require(LocalPlayer.PlayerScripts:WaitForChild("PlayerModule"))
+            PlayerModule:GetControls():Enable()
+        end)
     end)
 
     if _camConn then _camConn:Disconnect() end
@@ -468,7 +472,7 @@ local function doHumanoidBypass()
         local c = LocalPlayer.Character
         if not c then return end
         local h2 = c:FindFirstChildOfClass("Humanoid")
-        if h2 then
+        if h2 and Workspace.CurrentCamera.CameraSubject ~= h2 then
             pcall(function() Workspace.CurrentCamera.CameraSubject = h2 end)
         end
     end)
@@ -494,7 +498,7 @@ task.spawn(function()
                 r.AssemblyAngularVelocity = Vector3.zero
                 r.CFrame = CFrame.new(START_POS + Vector3.new(0, 4, 0))
             end)
-            print("[AntiVoid] Saved from void! Teleported to base.")
+            print("[AntiVoid] Prevented falling into void! Safely returned to base.")
         end
     end
 end)
@@ -527,15 +531,15 @@ local _animConn   = nil
 local function stopAllAnims()
     local c = LocalPlayer.Character
     if not c then return end
-    local hum = c:FindFirstChildOfClass("Humanoid")
-    if not hum then return end
-    local animator = hum:FindFirstChildOfClass("Animator")
+    local humPart = c:FindFirstChildOfClass("Humanoid")
+    if not humPart then return end
+    local animator = humPart:FindFirstChildOfClass("Animator")
     if animator then
         for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
             pcall(function() track:Stop(0) end)
         end
     end
-    for _, track in ipairs(hum:GetPlayingAnimationTracks()) do
+    for _, track in ipairs(humPart:GetPlayingAnimationTracks()) do
         pcall(function() track:Stop(0) end)
     end
     for _, obj in ipairs(c:GetDescendants()) do
@@ -778,12 +782,7 @@ local function runAutoPlace()
 
         for k, rec in pairs(owned) do
             if placed >= MAX_PER_RUN then break end
-            local uid
-            if type(k) == "string" then
-                uid = k
-            elseif type(rec) == "table" and rec.Uid then
-                uid = rec.Uid
-            end
+            local uid = type(k) == "string" and k or (type(rec) == "table" and rec.Uid)
             if not uid or type(k) ~= "string" then continue end
 
             if rec.Placement ~= nil then
@@ -1102,6 +1101,7 @@ local function runAutoPlacePet()
             end
             task.wait(0.1)
         end
+        print(string.format("[AutoPlacePet] total placed=%d", placed))
     end)
 end
 
@@ -1212,7 +1212,6 @@ local function runAutoHatch()
         local owned = EggState.ReadOwnerEggs(LocalPlayer.UserId)
         if type(owned) ~= "table" then return end
 
-        local hatched = 0
         for uid, rec in pairs(owned) do
             if type(uid) ~= "string" then continue end
             if AskHatch then
@@ -1223,9 +1222,6 @@ local function runAutoHatch()
                 local ok, r1, r2, petUid = pcall(function()
                     return AskFinishHatch:InvokeServer(uid)
                 end)
-                if ok and r1 == true then
-                    hatched += 1
-                end
                 task.wait(0.05)
             end
         end
@@ -1437,12 +1433,12 @@ local function shouldFavorite(tool)
     if isPet and not State.favPetEnabled then return false end
     if isEgg and not State.favEggEnabled then return false end
 
-    if next(State.favMinRarities) then
+    if next(State.favMinRarities) and not State.favMinRarities["All"] then
         local rarity = isPet and PET_RARITY_MAP[tool.Name] or (tool:GetAttribute("Rarity") or tool:GetAttribute("rarity"))
         if not rarity or not State.favMinRarities[rarity] then return false end
     end
 
-    if State.favMutations and next(State.favMutations) then
+    if State.favMutations and next(State.favMutations) and not State.favMutations["All"] then
         local mut = tool:GetAttribute("Mutations")
         local hasMut = false
         if type(mut) == "string" then
@@ -1521,7 +1517,7 @@ local function setReduceMap(enabled)
             lighting.GlobalShadows = false
             lighting.FogEnd = 9999
             lighting.FogStart = 9998
-            for _, obj in ipairs(Workspace:GetDescendants()) do
+            for _, obj in ipairs(game:GetService("Workspace"):GetDescendants()) do
                 pcall(function()
                     if obj:IsA("ParticleEmitter") or obj:IsA("Trail")
                     or obj:IsA("Beam") or obj:IsA("SelectionBox") then
@@ -1678,6 +1674,7 @@ local function farmCycle()
         local h2claim = hum()
         if h2claim then h2claim.WalkSpeed = 0; h2claim:Move(Vector3.zero, false) end
         
+        -- Anti-void safe Y offset
         local safeClaimY = math.max(part.Position.Y + 3.2, r.Position.Y)
         pcall(function()
             r.CFrame = CFrame.new(part.Position.X, safeClaimY, part.Position.Z) * (r.CFrame - r.CFrame.Position)
@@ -1733,17 +1730,30 @@ local function farmCycle()
         end
         State.lockedRecord = nil
 
-        local rbTimeout = tick() + 2
+        -- Step 5: Wait for rubberband
+        local rbTimeout = tick() + 1.5
         while tick() < rbTimeout do
             local r3 = root(); if not r3 then break end
             if Vector3.new(r3.AssemblyLinearVelocity.X, 0, r3.AssemblyLinearVelocity.Z).Magnitude < 8 then break end
             task.wait(0.05)
         end
 
-        walkTo(START_POS, 10, true)
-        if not State.running then State.busy = false; return end
-        task.wait(1.5)
+        -- Step 6: Return - FIRST run with TPWalk towards base, THEN teleport directly to base
+        walkTo(START_POS, 2.5, false)
 
+        r = root()
+        local h2ret = hum()
+        if r and h2ret then
+            pcall(function()
+                r.CFrame = CFrame.new(START_POS + Vector3.new(0, 3.2, 0))
+                r.AssemblyLinearVelocity  = Vector3.zero
+                r.AssemblyAngularVelocity = Vector3.zero
+            end)
+            h2ret.WalkSpeed = 16
+        end
+        task.wait(0.5)
+
+        -- Step 7: Auto unequip egg to backpack
         local charEq = LocalPlayer.Character
         if charEq then
             for _, t in ipairs(charEq:GetChildren()) do
@@ -1938,7 +1948,7 @@ task.spawn(function()
 end)
 
 -- ============================================================
--- FULL NEW FEATURES (Haul, Codex, Fusery, Bloomery, Parasite)
+-- FULL EXTRA SYSTEMS
 -- ============================================================
 
 -- HAUL
@@ -1984,7 +1994,7 @@ local function autoFuse(uid1, uid2, uid3)
     end
 end
 
--- BLOOMERY (Cherry Blossom)
+-- BLOOMERY
 local _batTreeConn = nil
 local _bloomEventConn = nil
 local _bloomActive = false
@@ -2107,7 +2117,7 @@ local function startAutoFeedParasite()
                 for uid, rec in pairs(owned) do
                     if type(uid) ~= "string" then continue end
                     if not rec.HasParasite then continue end
-                    if next(State.parasiteMinRarities) then
+                    if next(State.parasiteMinRarities) and not State.parasiteMinRarities["All"] then
                         local rarName = getRarityName(rec)
                         if not State.parasiteMinRarities[rarName] then continue end
                     end
@@ -2197,12 +2207,19 @@ local function Notify(title, text)
     end)
 end
 
-local RARITIES = {
-    "Common","Uncommon","Rare","Epic","Legendary","Mythic",
+local RARITIES_OPTIONS = {
+    "All", "Common","Uncommon","Rare","Epic","Legendary","Mythic",
     "SuperRare","Exotic","Limited","Divine","Secret","Titan",
     "Cosmic","Celestial","Transcendent","Prismatic","Rainbow",
     "Eternal","Brainrot","Mythical","Exclusive"
 }
+
+local AREA_OPTIONS = {
+    "All", "Forest","Lake","Desert","Jungle","Snow","Volcano",
+    "Abyss Ocean","Prehistoric","Cosmic","Cherry Blossom","Titan Temple"
+}
+
+local MUTATION_OPTIONS = {"All", "Silver", "Bloom", "Golden", "Rainbow", "Spirit Bloom"}
 
 -- Window Definition
 local Window = Luna:CreateWindow({
@@ -2234,7 +2251,7 @@ Window:CreateHomeTab({
 })
 
 -- ============================================================
--- TAB 1: FARM (Using verified icon "view_in_ar")
+-- TAB 1: FARM
 -- ============================================================
 local TabFarm = Window:CreateTab({
     Name        = "Farm",
@@ -2261,10 +2278,32 @@ TabFarm:CreateToggle({
                 while State.running do farmCycle(); task.wait(0.05) end
             end)
         else
-            State.running = false; State.busy = false; State.lockedRecord = nil
+            State.running = false
+            State.busy = false
+            State.lockedRecord = nil
             if _camConn then _camConn:Disconnect(); _camConn = nil end
             if _speedConn then _speedConn:Disconnect(); _speedConn = nil end
             stopSpeedBypass()
+
+            -- Cleanly restore normal humanoid & walking mechanics
+            local h = hum()
+            if h then
+                h.WalkSpeed = 16
+                h.PlatformStand = false
+                h.Sit = false
+                pcall(function() h:ChangeState(Enum.HumanoidStateType.Running) end)
+                pcall(function() Workspace.CurrentCamera.CameraSubject = h end)
+            end
+            local r = root()
+            if r then
+                r.AssemblyLinearVelocity = Vector3.zero
+                r.AssemblyAngularVelocity = Vector3.zero
+            end
+            pcall(function()
+                local PlayerModule = require(LocalPlayer.PlayerScripts:WaitForChild("PlayerModule"))
+                PlayerModule:GetControls():Enable()
+            end)
+
             Notify("Louis Hub", "Farm stopped.")
         end
     end
@@ -2313,15 +2352,17 @@ TabFarm:CreateSlider({
 TabFarm:CreateDropdown({
     Name            = "Target Rarities",
     Description     = nil,
-    Options         = RARITIES,
-    CurrentOption   = { "Common" },
+    Options         = RARITIES_OPTIONS,
+    CurrentOption   = { "All" },
     MultipleOptions = true,
     SpecialType     = nil,
     Callback        = function(opts)
         State.targetRarities = {}
         if type(opts) == "table" then
-            for _, s in ipairs(opts) do State.targetRarities[s] = true end
-        elseif type(opts) == "string" then
+            for _, s in ipairs(opts) do
+                if s ~= "All" then State.targetRarities[s] = true end
+            end
+        elseif type(opts) == "string" and opts ~= "All" then
             State.targetRarities[opts] = true
         end
     end
@@ -2330,15 +2371,17 @@ TabFarm:CreateDropdown({
 TabFarm:CreateDropdown({
     Name            = "Target Areas",
     Description     = nil,
-    Options         = AREA_NAMES,
-    CurrentOption   = { "Forest" },
+    Options         = AREA_OPTIONS,
+    CurrentOption   = { "All" },
     MultipleOptions = true,
     SpecialType     = nil,
     Callback        = function(opts)
         State.targetAreas = {}
         if type(opts) == "table" then
-            for _, s in ipairs(opts) do State.targetAreas[s] = true end
-        elseif type(opts) == "string" then
+            for _, s in ipairs(opts) do
+                if s ~= "All" then State.targetAreas[s] = true end
+            end
+        elseif type(opts) == "string" and opts ~= "All" then
             State.targetAreas[opts] = true
         end
     end
@@ -2354,15 +2397,17 @@ TabFarm:CreateToggle({
 TabFarm:CreateDropdown({
     Name            = "Target Mutations",
     Description     = nil,
-    Options         = MUTATIONS,
-    CurrentOption   = { "Golden" },
+    Options         = MUTATION_OPTIONS,
+    CurrentOption   = { "All" },
     MultipleOptions = true,
     SpecialType     = nil,
     Callback        = function(opts)
         State.targetMutations = {}
         if type(opts) == "table" then
-            for _, s in ipairs(opts) do State.targetMutations[s] = true end
-        elseif type(opts) == "string" then
+            for _, s in ipairs(opts) do
+                if s ~= "All" then State.targetMutations[s] = true end
+            end
+        elseif type(opts) == "string" and opts ~= "All" then
             State.targetMutations[opts] = true
         end
     end
@@ -2454,15 +2499,17 @@ TabFarm:CreateToggle({
 TabFarm:CreateDropdown({
     Name            = "Min Rarity (Parasite Egg)",
     Description     = nil,
-    Options         = RARITIES,
-    CurrentOption   = { "Common" },
+    Options         = RARITIES_OPTIONS,
+    CurrentOption   = { "All" },
     MultipleOptions = true,
     SpecialType     = nil,
     Callback        = function(opts)
         State.parasiteMinRarities = {}
         if type(opts) == "table" then
-            for _, s in ipairs(opts) do State.parasiteMinRarities[s] = true end
-        elseif type(opts) == "string" then
+            for _, s in ipairs(opts) do
+                if s ~= "All" then State.parasiteMinRarities[s] = true end
+            end
+        elseif type(opts) == "string" and opts ~= "All" then
             State.parasiteMinRarities[opts] = true
         end
     end
@@ -2478,7 +2525,7 @@ TabFarm:CreateButton({
 })
 
 -- ============================================================
--- TAB 2: AUTO (Using verified icon "dashboard")
+-- TAB 2: AUTO
 -- ============================================================
 local TabAuto = Window:CreateTab({
     Name        = "Auto",
@@ -2507,25 +2554,13 @@ TabAuto:CreateSlider({
 TabAuto:CreateDropdown({
     Name            = "Min Rarity Egg",
     Description     = nil,
-    Options         = RARITIES,
-    CurrentOption   = { "Common" },
-    MultipleOptions = true,
+    Options         = RARITIES_OPTIONS,
+    CurrentOption   = { "All" },
+    MultipleOptions = false,
     SpecialType     = nil,
     Callback        = function(opts)
-        local minNum = 999
-        if type(opts) == "table" then
-            for _, k in ipairs(opts) do
-                if RARITY_ORDER[k] then minNum = math.min(minNum, RARITY_ORDER[k]) end
-            end
-        elseif type(opts) == "string" and RARITY_ORDER[opts] then
-            minNum = RARITY_ORDER[opts]
-        end
-        State.placeMinRarity = minNum < 999 and (function()
-            for k in pairs(RARITY_ORDER) do
-                if RARITY_ORDER[k] == minNum then return k end
-            end
-            return "All"
-        end)() or "All"
+        local choice = type(opts) == "table" and opts[1] or opts
+        State.placeMinRarity = choice or "All"
     end
 }, "PlaceMinRarity")
 
@@ -2631,15 +2666,17 @@ TabAuto:CreateToggle({
 TabAuto:CreateDropdown({
     Name            = "Target Rarities",
     Description     = nil,
-    Options         = RARITIES,
-    CurrentOption   = { "Common" },
+    Options         = RARITIES_OPTIONS,
+    CurrentOption   = { "All" },
     MultipleOptions = true,
     SpecialType     = nil,
     Callback        = function(opts)
         State.favMinRarities = {}
         if type(opts) == "table" then
-            for _, s in ipairs(opts) do State.favMinRarities[s] = true end
-        elseif type(opts) == "string" then
+            for _, s in ipairs(opts) do
+                if s ~= "All" then State.favMinRarities[s] = true end
+            end
+        elseif type(opts) == "string" and opts ~= "All" then
             State.favMinRarities[opts] = true
         end
     end
@@ -2654,7 +2691,7 @@ TabAuto:CreateButton({
 })
 
 -- ============================================================
--- TAB 3: STORE (Using verified icon "directions_run")
+-- TAB 3: STORE
 -- ============================================================
 local TabStore = Window:CreateTab({
     Name        = "Store",
@@ -2690,15 +2727,17 @@ TabStore:CreateSlider({
 TabStore:CreateDropdown({
     Name            = "Sell Pet Rarities",
     Description     = nil,
-    Options         = RARITIES,
-    CurrentOption   = { "Common" },
+    Options         = RARITIES_OPTIONS,
+    CurrentOption   = { "All" },
     MultipleOptions = true,
     SpecialType     = nil,
     Callback        = function(opts)
         State.sellPetMaxRarities = {}
         if type(opts) == "table" then
-            for _, s in ipairs(opts) do State.sellPetMaxRarities[s] = true end
-        elseif type(opts) == "string" then
+            for _, s in ipairs(opts) do
+                if s ~= "All" then State.sellPetMaxRarities[s] = true end
+            end
+        elseif type(opts) == "string" and opts ~= "All" then
             State.sellPetMaxRarities[opts] = true
         end
     end
@@ -2732,15 +2771,17 @@ TabStore:CreateSlider({
 TabStore:CreateDropdown({
     Name            = "Sell Egg Rarities",
     Description     = nil,
-    Options         = RARITIES,
-    CurrentOption   = { "Common" },
+    Options         = RARITIES_OPTIONS,
+    CurrentOption   = { "All" },
     MultipleOptions = true,
     SpecialType     = nil,
     Callback        = function(opts)
         State.sellEggMaxRarities = {}
         if type(opts) == "table" then
-            for _, s in ipairs(opts) do State.sellEggMaxRarities[s] = true end
-        elseif type(opts) == "string" then
+            for _, s in ipairs(opts) do
+                if s ~= "All" then State.sellEggMaxRarities[s] = true end
+            end
+        elseif type(opts) == "string" and opts ~= "All" then
             State.sellEggMaxRarities[opts] = true
         end
     end
@@ -2849,7 +2890,7 @@ TabStore:CreateButton({
 })
 
 -- ============================================================
--- TAB 4: MISC (Using verified icon "settings")
+-- TAB 4: MISC
 -- ============================================================
 local TabMisc = Window:CreateTab({
     Name        = "Misc",
